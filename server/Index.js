@@ -14,6 +14,7 @@ const Message = require("./Models/messagemodel");
 const Student = require("./Models/Student");
 const Lecturer = require("./Models/LecturerModel");
 const Hod = require("./Models/HodModel");
+const scheduleRouter = require("./Routes/Shedule");
 
 const app = express();
 const server = http.createServer(app);
@@ -34,6 +35,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/hod", HodRouter);
 app.use("/api/lecturer", LecturerRouter);
 app.use("/api/assignments", AssignmentRouter);
+app.use("/api/schedule", scheduleRouter);
+
 
 // Database Connection
 mongoose.connect(process.env.MONGO_URI, {

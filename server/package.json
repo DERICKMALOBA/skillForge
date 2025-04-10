@@ -12,6 +12,7 @@
     "nodemailer-express-handlebars": "^7.0.0",
     "path": "^0.12.7",
     "peer": "^1.0.2",
+    "react-datepicker": "^8.3.0",
     "simple-peer": "^9.11.1",
     "socket.io": "^4.8.1",
     "uuid": "^11.1.0"

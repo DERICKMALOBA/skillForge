@@ -5,12 +5,14 @@ import {
   FaBook,
   FaVideo,
   FaTasks,
+  FaCalendarAlt ,
   FaComments,
   FaSignOutAlt,
 } from "react-icons/fa";
 import { useSelector } from "react-redux";
 import { useState, useEffect } from "react";
 import Overview from "./Overview";
+import ScheduleLectures from "./Shedule"; 
 import UploadMaterials from "./materialUpload";
 import GiveAssignments from "./Assignment";
 import Chat from "./LecturerChat";
@@ -109,6 +111,7 @@ export default function LecturerDashboard() {
 
   const sections = {
     dashboard: "Dashboard Overview",
+    schedule: "Schedule Lectures",
     liveLecture: "Start Live Lecture",
     resources: "Upload  Materials",
     assignments: "Give Assignments",
@@ -168,7 +171,25 @@ export default function LecturerDashboard() {
             </motion.button>
           </motion.div>
         );
-
+// Add this case to the switch statement in renderActiveSection
+case "schedule":
+  return (
+    <motion.div
+      className="p-6 bg-white rounded-lg shadow-lg"
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      {courses.length > 0 ? (
+        <ScheduleLectures  courses={courses} user={user} />
+      ) : (
+        <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md">
+          No courses available. Please contact administration to be
+          assigned to courses.
+        </div>
+      )}
+    </motion.div>
+  );
       case "assignments":
         return (
           <motion.div
@@ -346,6 +367,7 @@ function getIcon(section) {
   const icons = {
     dashboard: <FaChalkboardTeacher />,
     liveLecture: <FaVideo />,
+    schedule: <FaCalendarAlt />,  
     resources: <FaBook />,
     assignments: <FaTasks />,
     chat: <FaComments />,
