@@ -2,6 +2,7 @@ import { createSlice } from "@reduxjs/toolkit";
 
 const initialState = {
   user: null,
+  token: null,
   loading: false,
   error: null,
 };
@@ -32,8 +33,10 @@ const userSlice = createSlice({
     },
     loginSuccess: (state, action) => {
       state.user = action.payload.user;
+      state.token = action.payload.token;
       state.loading = false;
-      localStorage.setItem("user", JSON.stringify(action.payload.user));
+      sessionStorage.setItem("user", JSON.stringify(action.payload.user));
+      sessionStorage.setItem("token", action.payload.token);
     },
     loginFailure: (state, action) => {
       state.loading = false;
@@ -45,8 +48,8 @@ const userSlice = createSlice({
       state.user = null;
       state.loading = false;
       state.error = null;
-      localStorage.removeItem("user");
-      localStorage.removeItem("token");
+      sessionStorage.removeItem("user");
+      sessionStorage.removeItem("token");
     },
 
     // ERROR CLEAR
@@ -56,10 +59,11 @@ const userSlice = createSlice({
 
     // LOCAL STORAGE LOAD
     setUserFromLocalStorage: (state) => {
-      const user = JSON.parse(localStorage.getItem("user"));
-      const token = localStorage.getItem("token");
+      const user = JSON.parse( sessionStorage.getItem("user"));
+      const token = sessionStorage.getItem("token");
       if (user && token) {
         state.user = user;
+        state.token = token;
       }
     },
   },

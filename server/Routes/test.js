@@ -1,512 +1,408 @@
-require("dotenv").config();
-const express = require("express");
-const http = require("http");
+const express = require('express');
 const mongoose = require("mongoose");
-const cors = require("cors");
-const { v4: uuidV4 } = require("uuid");
-const { Server } = require("socket.io");
 
-const authRoutes = require("./Routes/AuthRoute");
-const HodRouter = require("./Routes/hod");
-const LecturerRouter = require("./Routes/LecturerRoute");
-const AssignmentRouter = require("./Routes/Assignment");
-const Message = require("./Models/MessageModel"); // You'll need to create this
+const AssignmentRouter = express.Router();
+const multer = require('multer');
+const path = require('path');
+const Lecturer = require('../Models/LecturerModel')
+const fs = require('fs');
+const Assignment = require('../Models/Assignment');
+const Course = require('../Models/CourseModel');
 
-const app = express();
-const server = http.createServer(app);
 
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
-app.use(express.json());
-app.use(express.static("public"));
-
-// Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/hod", HodRouter)
-app.use("/api/lecturer", LecturerRouter)
-app.use("/api/assignments", AssignmentRouter)
-
-// Connect to MongoDB
-mongoose
-  .connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-  })
-  .then(() => console.log("Connected to the database"))
-  .catch((err) => console.error("Database connection error:", err));
-
-// Socket.IO setup
-const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    methods: ["GET", "POST"],
-    credentials: true
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.EMAIL_USERNAME,
+    pass: process.env.EMAIL_PASSWORD,
   },
-  connectionStateRecovery: {
-    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutes
-    skipMiddlewares: true
+  tls: {
+    rejectUnauthorized: false
   }
 });
 
-// Store active users and their rooms
-const activeUsers = new Map();
-
-// Authentication middleware for Socket.IO
-io.use(async (socket, next) => {
-  try {
-    const userId = socket.handshake.auth.userId;
-    const role = socket.handshake.auth.role;
-    
-    if (!userId || !role) {
-      throw new Error("Authentication required");
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, '../uploads/assignments');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
     }
-    
-    // You might want to add more validation here depending on your auth system
-    socket.userId = userId;
-    socket.role = role;
-    next();
-  } catch (error) {
-    next(new Error("Authentication failed"));
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.id} (User ID: ${socket.userId}, Role: ${socket.role})`);
+const fileFilter = (req, file, cb) => {
+  const filetypes = /pdf|doc|docx|ppt|pptx/;
+  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = filetypes.test(file.mimetype);
 
-  // Video streaming room handling
-  socket.on("join-room", (roomId, userId) => {
-    socket.join(roomId);
-    socket.to(roomId).emit("user-connected", userId);
+  if (extname && mimetype) {
+    return cb(null, true);
+  } else {
+    cb(new Error('Only PDF, DOC, DOCX, PPT, and PPTX files are allowed!'));
+  }
+};
 
-    socket.on("disconnect", () => {
-      socket.to(roomId).emit("user-disconnected", userId);
-    });
-  });
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
 
-  // Chat message handling
-  socket.on("join_chat", async ({ courseId }) => {
+// Verify transporter connection (added)
+transporter.verify((error) => {
+  if (error) {
+    console.error('SMTP Connection Error:', error);
+  } else {
+    console.log('SMTP Server is ready to send messages');
+  }
+});
+
+// Authentication Middleware for Lecturers
+AssignmentRouter.use(async (req, res, next) => {
     try {
-      // Store user's active room
-      activeUsers.set(socket.id, { 
-        userId: socket.userId, 
-        courseId, 
-        role: socket.role 
-      });
-      
-      // Join the course-specific room
-      socket.join(`chat_${courseId}`);
-      console.log(`User ${socket.userId} (${socket.role}) joined course chat ${courseId}`);
-      
-      // Load previous messages from database
-      const messages = await Message.find({ courseId })
-        .sort({ timestamp: 1 })
-        .limit(100)
-        .lean();
-      
-      socket.emit("previous_messages", messages);
+      // Extract credentials from headers
+      const lecturerId = req.headers['lecturer-id'];
+      const userRole = req.headers['x-user-role'];
+  
+      // Validate presence of credentials
+      if (!lecturerId || lecturerId === 'undefined') {
+        return res.status(401).json({ 
+          success: false,
+          message: "Authentication required",
+          solution: "Please include your lecturer ID in the 'lecturer-id' header"
+        });
+      }
+  
+      // Verify lecturer role
+      if (userRole !== 'lecturer') {
+        return res.status(403).json({
+          success: false,
+          message: "Access forbidden",
+          details: "Lecturer privileges required",
+          solution: "Ensure 'x-user-role' header is set to 'lecturer'"
+        });
+      }
+  
+      // Validate ID format
+      if (!mongoose.Types.ObjectId.isValid(lecturerId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ID format",
+          expected: "Valid MongoDB ObjectId",
+          received: lecturerId
+        });
+      }
+  
+      // Verify lecturer exists
+      const lecturer = await Lecturer.findById(lecturerId)
+        .select('-password') // Exclude sensitive data
+        .populate('courses', 'courseName courseCode'); // Include basic course info
+  
+      if (!lecturer) {
+        return res.status(404).json({
+          success: false,
+          message: "Lecturer account not found",
+          actions: [
+            "Verify your lecturer ID",
+            "Contact system administration"
+          ]
+        });
+      }
+  
+      // Attach lecturer to request
+      req.lecturer = {
+        _id: lecturer._id,
+        name: lecturer.name,
+        email: lecturer.email,
+        courses: lecturer.courses,
+        role: lecturer.role
+      };
+  
+      next();
     } catch (error) {
-      console.error("Error joining chat:", error);
+      console.error('Authentication Error:', error);
+      res.status(500).json({
+        success: false,
+        message: "Authentication system error",
+        error: error.message,
+        troubleshooting: [
+          "Try again later",
+          "Ensure headers are properly formatted",
+          "Contact support if issue persists"
+        ]
+      });
     }
   });
-
-  socket.on("send_message", async (messageData) => {
+  
+  AssignmentRouter.post('/create', upload.array('files'), async (req, res) => {
     try {
-      const { courseId, content } = messageData;
-      const senderId = socket.userId;
-      
-      // Create and save the message
-      const message = new Message({
-        senderId,
-        senderName: messageData.senderName,
+      const lecturerId = req.lecturer._id;
+      const { 
         courseId,
-        content,
-        role: socket.role
+        title,
+        description,
+        instructions,
+        dueDate,
+        maxPoints,
+        submissionType,
+        allowedFileTypes,
+        maxFileSize,
+        allowMultipleAttempts,
+        notifyStudents
+      } = req.body;
+  
+      // Verify lecturer is assigned to this course
+      const isAssigned = req.lecturer.courses.some(course => 
+        course._id.equals(courseId)
+      );
+  
+      if (!isAssigned) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not assigned to this course"
+        });
+      }
+  
+      // Create the assignment
+      const assignment = await Assignment.create({
+        course: courseId,
+        title,
+        description,
+        instructions,
+        dueDate: new Date(dueDate),
+        maxPoints: maxPoints || 100,
+        submissionType: submissionType || 'both',
+        fileRequirements: {
+          allowedTypes: allowedFileTypes ? 
+            allowedFileTypes.split(',').map(ext => ext.trim()) : 
+            ['.pdf', '.doc', '.docx', '.ppt', '.pptx'],
+          maxSize: maxFileSize || 10
+        },
+        attachments: req.files?.map(file => ({
+          originalName: file.originalname,
+          fileName: file.filename,
+          path: `/uploads/assignments/${file.filename}`,
+          size: file.size,
+          mimetype: file.mimetype
+        })) || [],
+        allowMultipleAttempts: allowMultipleAttempts || false,
+        createdBy: lecturerId,
+        lecturer: lecturerId
       });
-      
-      const savedMessage = await message.save();
-      
-      // Broadcast to all in the course room including sender
-      io.to(`chat_${courseId}`).emit("receive_message", savedMessage);
+  
+      // Update course with new assignment
+      await Course.findByIdAndUpdate(courseId, {
+        $push: { assignments: assignment._id }
+      });
+
+      // Send notifications if enabled (added)
+      if (notifyStudents === 'true') {
+        try {
+          const course = await Course.findById(courseId).populate('enrolledStudents');
+          const lecturer = await Lecturer.findById(lecturerId);
+          
+          if (course && lecturer) {
+            const students = course.enrolledStudents;
+            
+            const emailPromises = students.map(async (student) => {
+              const formattedDueDate = new Date(dueDate).toLocaleString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              });
+
+              const mailOptions = {
+                from: {
+                  name: `${lecturer.title} ${lecturer.name}`,
+                  address: process.env.EMAIL_USERNAME
+                },
+                to: student.email,
+                subject: `[${course.courseName}] New Assignment: ${title}`,
+                html: `
+                  <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #2c3e50;">New Assignment Notification</h2>
+                    <p>Dear ${student.name},</p>
+                    
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                      <h3 style="margin-top: 0; color: #3498db;">${title}</h3>
+                      <p><strong>Course:</strong> ${course.courseName}</p>
+                      <p><strong>Instructor:</strong> ${lecturer.title} ${lecturer.name}</p>
+                      ${description ? `<p><strong>Description:</strong> ${description}</p>` : ''}
+                      <p><strong>Due Date:</strong> ${formattedDueDate}</p>
+                    </div>
+                    
+                    <p>Please log in to the learning management system to view and submit the assignment.</p>
+                    
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
+                      <p>Best regards,</p>
+                      <p>${lecturer.title} ${lecturer.name}<br>
+                      ${course.courseName} Instructor</p>
+                    </div>
+                  </div>
+                `
+              };
+
+              try {
+                await transporter.sendMail(mailOptions);
+                return { success: true, email: student.email };
+              } catch (error) {
+                return { success: false, email: student.email, error: error.message };
+              }
+            });
+
+            await Promise.all(emailPromises);
+          }
+        } catch (notificationError) {
+          console.error("Notification failed:", notificationError);
+          // Don't fail the whole request if notifications fail
+        }
+      }
+  
+      res.status(201).json({
+        success: true,
+        data: assignment,
+        notificationsSent: notifyStudents === 'true'
+      });
+  
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error('Assignment Creation Error:', error);
+      
+      if (error.name === 'ValidationError') {
+        const messages = Object.values(error.errors).map(val => val.message);
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: messages
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: 'Failed to create assignment',
+        error: error.message
+      });
     }
   });
 
-  socket.on("leave_chat", ({ courseId }) => {
-    socket.leave(`chat_${courseId}`);
-    console.log(`User ${socket.userId} left course chat ${courseId}`);
-  });
+// Get assignments for a course
+AssignmentRouter.get('/course/:courseId', async (req, res) => {
+  try {
+    const assignments = await Assignment.find({ course: req.params.courseId })
+      .sort('-createdAt')
+      .populate('createdBy', 'name');
 
-  socket.on("disconnect", () => {
-    const userData = activeUsers.get(socket.id);
-    if (userData) {
-      console.log(`User ${userData.userId} disconnected`);
-      activeUsers.delete(socket.id);
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      data: assignments
+    });
+  } catch (error) {
+    console.error('Error fetching assignments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assignments'
+    });
+  }
+});
+
+// Get single assignment
+AssignmentRouter.get('/:id', async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.id)
+      .populate('course', 'courseName courseCode')
+      .populate('createdBy', 'name');
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Assignment not found'
+      });
     }
-  });
 
-  // Existing video streaming events
-  socket.on("chat-message", (message) => {
-    io.emit("chat-message", message);
-  });
-
-  socket.on("raise-hand", ({ userId, raisedHand }) => {
-    io.emit("raise-hand", { userId, raisedHand });
-  });
-});
-
-// Start the server
-const PORT = process.env.PORT || 8000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
-
-
-
-
-
-
-
-
-
-
-
-require("dotenv").config();
-const express = require("express");
-const http = require("http");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const { v4: uuidV4 } = require("uuid");
-const { Server } = require("socket.io");
-
-const authRoutes = require("./Routes/AuthRoute");
-const HodRouter = require("./Routes/hod");
-const LecturerRouter = require("./Routes/LecturerRoute");
-const AssignmentRouter = require("./Routes/Assignment");
-const Message = require("./models/Message");
-const Student = require("./models/Student"); // Add these models
-const Lecturer = require("./models/Lecturer"); // Add these models
-
-const app = express();
-const server = http.createServer(app);
-
-// Middleware
-app.use(cors({
-  origin: "http://localhost:5173",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true,
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-
-app.use(express.json());
-app.use(express.static("public"));
-
-// Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/hod", HodRouter);
-app.use("/api/lecturer", LecturerRouter);
-app.use("/api/assignments", AssignmentRouter);
-
-// Connect to MongoDB
-mongoose
-  .connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-  })
-  .then(() => console.log("Connected to the database"))
-  .catch((err) => console.error("Database connection error:", err));
-
-// Socket.IO setup
-const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"],
-    credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"]
-  },
-  connectionStateRecovery: {
-    maxDisconnectionDuration: 2 * 60 * 1000,
-    skipMiddlewares: true
+    res.status(200).json({
+      success: true,
+      data: assignment
+    });
+  } catch (error) {
+    console.error('Error fetching assignment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assignment'
+    });
   }
 });
 
-// Track connected users
-const connectedUsers = new Map();
-
-// Authentication middleware for Socket.IO
-io.use(async (socket, next) => {
+// Update assignment
+AssignmentRouter.put('/:id', async (req, res) => {
   try {
-    const { userId, role, regNumber } = socket.handshake.auth;
-    
-    if (!userId || !role) {
-      throw new Error("Authentication required");
+    const assignment = await Assignment.findByIdAndUpdate(
+      req.params.id, 
+      req.body, 
+      { new: true, runValidators: true }
+    );
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Assignment not found'
+      });
     }
-    
-    // Verify user exists in database
-    let user;
-    if (role === 'student') {
-      user = await Student.findById(userId);
-    } else if (role === 'lecturer') {
-      user = await Lecturer.findById(userId);
+
+    res.status(200).json({
+      success: true,
+      data: assignment
+    });
+  } catch (error) {
+    console.error('Error updating assignment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update assignment'
+    });
+  }
+});
+
+// Delete assignment
+AssignmentRouter.delete('/:id', async (req, res) => {
+  try {
+    const assignment = await Assignment.findByIdAndDelete(req.params.id);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Assignment not found'
+      });
     }
-    
-    if (!user) throw new Error("User not found");
-    
-    socket.userData = {
-      id: userId,
-      role,
-      name: user.name,
-      regNumber: user.regNumber || null,
-      socketId: socket.id
-    };
-    
-    next();
-  } catch (error) {
-    next(new Error("Authentication failed: " + error.message));
-  }
-});
 
-// ... [rest of your existing Socket.IO implementation] ...
+    // Remove assignment reference from course
+    await Course.updateOne(
+      { _id: assignment.course },
+      { $pull: { assignments: assignment._id } }
+    );
 
-// =============================================
-// TESTING ENDPOINTS
-// =============================================
-
-// Get all connected users (for testing)
-app.get("/api/test/connected-users", (req, res) => {
-  const users = Array.from(connectedUsers.values()).map(user => ({
-    id: user.id,
-    role: user.role,
-    name: user.name,
-    regNumber: user.regNumber,
-    socketId: user.socketId
-  }));
-  res.json(users);
-});
-
-// Get all messages (for testing)
-app.get("/api/test/messages", async (req, res) => {
-  try {
-    const messages = await Message.find().sort({ createdAt: -1 });
-    res.json(messages);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get messages between specific users (for testing)
-app.get("/api/test/messages/:userId1/:userId2", async (req, res) => {
-  try {
-    const messages = await Message.find({
-      $or: [
-        { from: req.params.userId1, to: req.params.userId2 },
-        { from: req.params.userId2, to: req.params.userId1 }
-      ]
-    }).sort({ createdAt: 1 });
-    res.json(messages);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get all students (for testing)
-app.get("/api/test/students", async (req, res) => {
-  try {
-    const students = await Student.find().select("name regNumber");
-    res.json(students);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get all lecturers (for testing)
-app.get("/api/test/lecturers", async (req, res) => {
-  try {
-    const lecturers = await Lecturer.find().select("name email department");
-    res.json(lecturers);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Simulate student sending message (for testing)
-app.post("/api/test/send-student-message", async (req, res) => {
-  try {
-    const { studentId, lecturerId, content } = req.body;
-    
-    const student = await Student.findById(studentId);
-    if (!student) throw new Error("Student not found");
-    
-    const lecturer = await Lecturer.findById(lecturerId);
-    if (!lecturer) throw new Error("Lecturer not found");
-    
-    const message = new Message({
-      from: studentId,
-      fromRole: 'student',
-      fromRegNumber: student.regNumber,
-      to: lecturerId,
-      toRole: 'lecturer',
-      content
-    });
-    
-    const savedMessage = await message.save();
-    
-    // If lecturer is connected, send via socket
-    const lecturerSocket = connectedUsers.get(lecturerId);
-    if (lecturerSocket) {
-      io.to(`user_${lecturerId}`).emit("private_message", savedMessage);
-    }
-    
-    res.json(savedMessage);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Simulate lecturer sending message (for testing)
-app.post("/api/test/send-lecturer-message", async (req, res) => {
-  try {
-    const { lecturerId, studentId, content } = req.body;
-    
-    const lecturer = await Lecturer.findById(lecturerId);
-    if (!lecturer) throw new Error("Lecturer not found");
-    
-    const student = await Student.findById(studentId);
-    if (!student) throw new Error("Student not found");
-    
-    const message = new Message({
-      from: lecturerId,
-      fromRole: 'lecturer',
-      to: studentId,
-      toRole: 'student',
-      content
-    });
-    
-    const savedMessage = await message.save();
-    
-    // If student is connected, send via socket
-    const studentSocket = connectedUsers.get(studentId);
-    if (studentSocket) {
-      io.to(`user_${studentId}`).emit("private_message", savedMessage);
-    }
-    
-    res.json(savedMessage);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Start the server
-const PORT = process.env.PORT || 8000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Get messages between two users
-app.get("/api/messages/:userId/:withUserId", async (req, res) => {
-  try {
-    const messages = await Message.find({
-      $or: [
-        { from: req.params.userId, to: req.params.withUserId },
-        { from: req.params.withUserId, to: req.params.userId }
-      ]
-    })
-    .sort({ timestamp: 1 })
-    .lean();
-
-    res.json({
-      status: "success",
-      data: messages.map(msg => ({
-        id: msg._id,
-        from: msg.from,
-        to: msg.to,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        fromName: msg.fromName,
-        fromRegNumber: msg.fromRegNumber
-      }))
+    res.status(204).json({
+      success: true,
+      data: null
     });
   } catch (error) {
-    console.error("Messages fetch error:", error);
-    res.status(500).json({ 
-      status: "error",
-      message: "Failed to fetch messages",
-      error: error.message
+    console.error('Error deleting assignment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete assignment'
     });
   }
 });
 
-// Get all messages (admin only)
-app.get("/api/messages", async (req, res) => {
-  try {
-    // Add proper admin authentication in production
-    const messages = await Message.find()
-      .sort({ timestamp: -1 })
-      .lean();
-
-    res.json({
-      status: "success",
-      data: messages.map(msg => ({
-        id: msg._id,
-        from: msg.from,
-        to: msg.to,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        fromName: msg.fromName,
-        fromRegNumber: msg.fromRegNumber,
-        fromRole: msg.fromRole
-      }))
-    });
-  } catch (error) {
-    console.error("All messages fetch error:", error);
-    res.status(500).json({ 
-      status: "error",
-      message: "Failed to fetch all messages",
-      error: error.message
-    });
-  }
-});
-
-// Get connected users (admin only)
-app.get("/api/connected-users", (req, res) => {
-  try {
-    // Add proper admin authentication in production
-    const users = Array.from(connectedUsers.values()).map(user => ({
-      id: user.id,
-      role: user.role,
-      name: user.name,
-      regNumber: user.regNumber,
-      department: user.department,
-      socketId: user.socketId,
-      lastActive: new Date()
-    }));
-
-    res.json({
-      status: "success",
-      data: users
-    });
-  } catch (error) {
-    console.error("Connected users fetch error:", error);
-    res.status(500).json({ 
-      status: "error",
-      message: "Failed to fetch connected users",
-      error: error.message
-    });
-  }
-});
+module.exports = AssignmentRouter;

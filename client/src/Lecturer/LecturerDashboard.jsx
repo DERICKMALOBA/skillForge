@@ -5,7 +5,7 @@ import {
   FaBook,
   FaVideo,
   FaTasks,
-  FaCalendarAlt ,
+  FaCalendarAlt,
   FaComments,
   FaSignOutAlt,
 } from "react-icons/fa";
@@ -16,23 +16,23 @@ import ScheduleLectures from "./Shedule";
 import UploadMaterials from "./materialUpload";
 import GiveAssignments from "./Assignment";
 import Chat from "./LecturerChat";
-import { logoutUser } from "../redux/userSlice";
+import { logoutUser } from "../Redux/UserSlice";
 import { useDispatch } from "react-redux";
-
 import { toast } from "react-toastify";
 
 export default function LecturerDashboard() {
   const user = useSelector((state) => state.user.user);
   const [activeSection, setActiveSection] = useState("dashboard");
-  const [currentTime, setCurrentTime] = useState(
-    new Date().toLocaleTimeString()
-  );
-  const [error, setError]= useState(false)
+  const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  const [error, setError] = useState(false);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState("");
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const token = useSelector((state) => state.user.token) || localStorage.getItem('token');
+
   
   useEffect(() => {
     const fetchData = async () => {
@@ -45,9 +45,9 @@ export default function LecturerDashboard() {
           throw new Error('User session not loaded. Please wait...');
         }
 
-        // Use _id instead of id
         if (!user._id) {
           console.error('User ID missing in:', user);
+          console.log("lecturer id ",user._id)
           throw new Error('Your session is incomplete. Please log in again.');
         }
 
@@ -57,12 +57,12 @@ export default function LecturerDashboard() {
         }
         console.groupEnd();
 
-        const lecturerId = String(user._id).trim();  // Fix here for _id
+        const lecturerId = String(user._id).trim();
         console.log('[FRONTEND] Sending request with lecturer ID:', lecturerId);
 
         const response = await fetch("/api/lecturer/my-courses", {
           headers: {
-            'lecturer-id': lecturerId,  // Ensure correct header
+            'lecturer-id': lecturerId,
             'Content-Type': 'application/json',
             'X-User-Role': user.role
           },
@@ -92,35 +92,84 @@ export default function LecturerDashboard() {
         });
         setError(error.message);
         setCourses([]);
-        setAnnouncements([]);
       } finally {
         setLoading(false);
       }
     };
 
     if (user?.role === 'lecturer') {
-      console.log('[FRONTEND] Initiating lecturer data fetch for:', user._id);  // Use _id here
+      console.log('[FRONTEND] Initiating lecturer data fetch for:', user._id);
       fetchData();
     } else {
       console.log('[FRONTEND] Access Denied - User:', 
         user ? `Role: ${user.role}` : 'Not logged in');
       setLoading(false);
     }
-  }, [user]); // Dependency array listens for changes in the `user` object
-  
+  }, [user]);
 
   const sections = {
     dashboard: "Dashboard Overview",
     schedule: "Schedule Lectures",
     liveLecture: "Start Live Lecture",
-    resources: "Upload  Materials",
+    resources: "Upload Materials",
     assignments: "Give Assignments",
     chat: "Student Chats",
   };
 
-  const handleStartLiveLecture = () => {
-    navigate("/live");
+  const handleStartLiveLecture = async () => {
+    try {
+      // Validate user and input
+      if (!user?._id) {
+        throw new Error('No lecturer ID available - please log in again');
+      }
+      
+      if (!selectedCourseId) {
+        throw new Error('Please select a course first');
+      }
+  
+      // Make API request
+      const response = await fetch("/api/lectures/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ 
+          courseId: selectedCourseId,
+          lecturerId: user._id
+        }),
+      });
+  
+      const data = await response.json();
+      
+      // Check for error response
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to start lecture");
+      }
+  
+      // Log success and navigate
+      console.log('Lecture started successfully:', {
+        lecturer: user.name,
+        course: data.lecture.courseName,
+        lectureId: data.lectureId
+      });
+      
+      navigate(`/live/${data.lectureId}`);
+  
+    } catch (error) {
+      console.error("Lecture start failed:", {
+        error: error.message,
+        user: user?._id,
+        course: selectedCourseId
+      });
+      toast.error(error.message);
+    }
   };
+
+
+  
+  
+
 
   const handleUploadClick = () => {
     setShowUploadModal(true);
@@ -152,44 +201,58 @@ export default function LecturerDashboard() {
         );
       case "liveLecture":
         return (
+          <>
+            {courses.length > 0 ? (
+              <>
+                <label htmlFor="course" className="mb-2 font-medium">
+                  Select a Course to Start Lecture:
+                </label>
+                <select
+                  id="course"
+                  className="mb-4 p-2 border rounded w-full"
+                  value={selectedCourseId}
+                  onChange={(e) => setSelectedCourseId(e.target.value)}
+                >
+                  <option value="">-- Select a course --</option>
+                  {courses.map((course) => (
+                    <option key={course._id} value={course._id}>
+                        {course.courseName} ({course.courseCode})
+                    </option>
+                  ))}
+                </select>
+                <motion.button
+                  className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-all duration-300"
+                  onClick={handleStartLiveLecture}
+                  disabled={!selectedCourseId}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Start Live Lecture
+                </motion.button>
+              </>
+            ) : (
+              <div>No courses available</div>
+            )}
+          </>
+        );
+      case "schedule":
+        return (
           <motion.div
-            className="p-6 bg-white rounded-lg shadow-lg flex flex-col items-center"
+            className="p-6 bg-white rounded-lg shadow-lg"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5 }}
           >
-            <p className="text-gray-600 mb-4">
-              Start a live lecture session with your students.
-            </p>
-            <motion.button
-              className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-all duration-300"
-              onClick={handleStartLiveLecture}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              Start Live Lecture
-            </motion.button>
+            {courses.length > 0 ? (
+              <ScheduleLectures courses={courses} user={user} />
+            ) : (
+              <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md">
+                No courses available. Please contact administration to be
+                assigned to courses.
+              </div>
+            )}
           </motion.div>
         );
-// Add this case to the switch statement in renderActiveSection
-case "schedule":
-  return (
-    <motion.div
-      className="p-6 bg-white rounded-lg shadow-lg"
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.5 }}
-    >
-      {courses.length > 0 ? (
-        <ScheduleLectures  courses={courses} user={user} />
-      ) : (
-        <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md">
-          No courses available. Please contact administration to be
-          assigned to courses.
-        </div>
-      )}
-    </motion.div>
-  );
       case "assignments":
         return (
           <motion.div
@@ -199,7 +262,7 @@ case "schedule":
             transition={{ duration: 0.5 }}
           >
             {courses.length > 0 ? (
-              <GiveAssignments courses={courses} />
+              <GiveAssignments courses={courses} user={user} />
             ) : (
               <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md">
                 No courses available. Please contact administration to be
@@ -215,7 +278,7 @@ case "schedule":
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5 }}
-            style={{ height: "calc(100vh - 200px)" }} // Adjust height as needed
+            style={{ height: "calc(100vh - 200px)" }}
           >
             <Chat courses={courses} />
           </motion.div>
@@ -229,10 +292,7 @@ case "schedule":
             transition={{ duration: 0.5 }}
           >
             {courses.length > 0 ? (
-              <UploadMaterials
-                courses={courses}
-                onClose={handleCloseUploadModal}
-              />
+              <UploadMaterials user={user} courses={courses} onClose={handleCloseUploadModal} />
             ) : (
               <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md">
                 No courses available. Please contact administration to be
@@ -256,6 +316,18 @@ case "schedule":
         );
     }
   };
+
+  function getIcon(section) {
+    const icons = {
+      dashboard: <FaChalkboardTeacher />,
+      liveLecture: <FaVideo />,
+      schedule: <FaCalendarAlt />,  
+      resources: <FaBook />,
+      assignments: <FaTasks />,
+      chat: <FaComments />,
+    };
+    return icons[section] || <FaChalkboardTeacher />;
+  }
 
   return (
     <div className="flex h-screen bg-gray-100">
@@ -340,7 +412,7 @@ case "schedule":
 
           {renderActiveSection()}
 
-          {/* Upload Modal - shown when triggered from Overview */}
+          {/* Upload Modal */}
           {showUploadModal && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <motion.div
@@ -361,16 +433,4 @@ case "schedule":
       </div>
     </div>
   );
-}
-
-function getIcon(section) {
-  const icons = {
-    dashboard: <FaChalkboardTeacher />,
-    liveLecture: <FaVideo />,
-    schedule: <FaCalendarAlt />,  
-    resources: <FaBook />,
-    assignments: <FaTasks />,
-    chat: <FaComments />,
-  };
-  return icons[section] || <FaChalkboardTeacher />;
 }

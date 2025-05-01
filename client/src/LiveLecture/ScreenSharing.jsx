@@ -1,14 +1,43 @@
 import React from "react";
 import { FaDesktop } from "react-icons/fa";
 
-const ScreenSharing = ({ onStartScreenShare, onStopScreenShare, isSharing }) => {
+const ScreenSharing = ({
+  onStartScreenShare,
+  onStopScreenShare,
+  isSharing,
+  isLoading = false,
+  error = null,
+}) => {
+  const handleClick = () => {
+    if (isLoading) return;
+    isSharing ? onStopScreenShare() : onStartScreenShare();
+  };
+
   return (
-    <button
-      onClick={isSharing ? onStopScreenShare : onStartScreenShare}
-      className="p-3 bg-gray-700 rounded-full"
-    >
-      <FaDesktop className={isSharing ? "text-green-500" : ""} />
-    </button>
+    <div className="relative flex flex-col items-center">
+      <button
+        onClick={handleClick}
+        disabled={isLoading}
+        className={`p-3 rounded-full transition-all ${
+          isSharing
+            ? "bg-green-900 hover:bg-green-800"
+            : "bg-gray-700 hover:bg-gray-600"
+        } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+        aria-label={isSharing ? "Stop screen sharing" : "Start screen sharing"}
+        aria-pressed={isSharing}
+      >
+        <FaDesktop
+          className={`${isSharing ? "text-green-400" : ""} ${
+            isLoading ? "animate-pulse" : ""
+          }`}
+        />
+      </button>
+      {error && (
+        <span className="absolute -bottom-6 text-xs text-red-500 whitespace-nowrap">
+          {error}
+        </span>
+      )}
+    </div>
   );
 };
 

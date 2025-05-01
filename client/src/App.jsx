@@ -13,6 +13,7 @@ import LiveLecture from "./LiveLecture/Livelecture";
 import UploadMaterials from "./Lecturer/materialUpload";
 import Unauthorized from "./pages/Unauthoried";
 import Login from "./pages/Login";
+import AssignmentDetail from "./Student/AssignmentDetails";
 
 const App = () => {
   return (
@@ -22,8 +23,9 @@ const App = () => {
         {/* Public Routes */}
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/live" element={<LiveLecture />} />
+        <Route path="/live/:lectureId" element={<LiveLecture />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
+        <Route path="/courses/:courseId/assignments/:assignmentId" element={<AssignmentDetail />} />
 
         {/* Student Route */}
         <Route

@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
+import { toast } from 'react-toastify';
 import { FaUpload, FaFilePdf, FaFileWord, FaFileExcel, FaFilePowerpoint, FaFileArchive, FaFileImage, FaFileVideo, FaTimes } from "react-icons/fa";
-import { useSelector } from "react-redux";
 
-export default function UploadMaterials({ courses, onClose }) {
-  const user = useSelector((state) => state.user.user);
+
+export default function UploadMaterials({ user,courses, onClose }) {
+  console.log("User:", user); // <-- Should show lecturer info
+  console.log("Courses:", courses);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
@@ -20,6 +22,9 @@ export default function UploadMaterials({ courses, onClose }) {
     license: "educational"
   });
   const fileInputRef = useRef(null);
+  const [students, setStudents] = useState([]);
+  const [isFetchingStudents, setIsFetchingStudents] = useState(false);
+  const [courseDetails, setCourseDetails] = useState(null);
 
   useEffect(() => {
     return () => {
@@ -29,6 +34,33 @@ export default function UploadMaterials({ courses, onClose }) {
       });
     };
   }, [selectedFiles]);
+
+  useEffect(() => {
+    const fetchStudentsAndCourse = async () => {
+      if (!metadata.courseId) return;
+      
+      setIsFetchingStudents(true);
+      try {
+        // Fetch students
+        const studentsResponse = await fetch('/api/hod/students');
+        if (!studentsResponse.ok) throw new Error("Failed to fetch students");
+        const studentsData = await studentsResponse.json();
+        setStudents(studentsData);
+
+        // Find course details from props instead of fetching
+        const courseData = courses.find(course => course._id === metadata.courseId);
+        if (!courseData) throw new Error("Course not found");
+        setCourseDetails(courseData);
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        setUploadError("Failed to load student list or course details. Notifications may not work.");
+      } finally {
+        setIsFetchingStudents(false);
+      }
+    };
+
+    fetchStudentsAndCourse();
+  }, [metadata.courseId, courses]);
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
@@ -59,57 +91,146 @@ export default function UploadMaterials({ courses, onClose }) {
     setMetadata(prev => ({ ...prev, tags }));
   };
 
+  const sendMaterialNotifications = async (uploadedMaterials = []) => {
+    console.log("=== STARTING NOTIFICATION PROCESS ===");
+    console.log("Uploaded Materials:", uploadedMaterials);
+    console.log("Current User:", user);
+    console.log("Course Details:", courseDetails);
+    console.log("Students:", students);
+  
+    if (!Array.isArray(uploadedMaterials) || uploadedMaterials.length === 0) {
+      console.warn("No materials to notify students about.");
+      return {
+        status: 'warning',
+        message: 'No materials to notify about.',
+      };
+    }
+  
+    if (!students.length || !courseDetails) {
+      console.warn("Missing students or course details. Students:", students.length, "Course Details:", !!courseDetails);
+      return {
+        status: 'warning',
+        message: 'Students or course details missing. Notification skipped.',
+      };
+    }
+  
+    try {
+      const studentIds = students.map(student => student._id);
+      console.log("Student IDs to notify:", studentIds);
+  
+      const notificationPayload = {
+        lecturerId: user.id || user._id,
+        studentIds,
+        title: metadata.title || "New Course Materials",
+        description: `${metadata.description}`,
+        courseName: courseDetails.courseName,
+        startTime: metadata.availableFrom,
+        endTime: metadata.availableTo || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+  
+      console.log("Notification Payload:", notificationPayload);
+  
+      const response = await fetch('/api/notify/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Role': user.role || user._role,
+        },
+        body: JSON.stringify(notificationPayload),
+        credentials: 'include',
+      });
+  
+      console.log("Notification Response Status:", response.status);
+      
+      const data = await response.json();
+      console.log("Notification Response Data:", data);
+  
+      if (!response.ok) {
+        throw new Error(data.message || "Notification failed");
+      }
+  
+      return {
+        status: 'success',
+        message: 'Students successfully notified',
+      };
+    } catch (error) {
+      console.error('Notification error:', error);
+      return {
+        status: 'warning',
+        message: 'Materials uploaded but student notifications failed',
+        error: error.message
+      };
+    }
+  };
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (selectedFiles.length === 0 || !user?.id) return;
-    
+  
+    if (!selectedFiles.length) {
+      toast.error("Please select at least one file.");
+      return;
+    }
+  
     setIsUploading(true);
     setUploadError(null);
-    
+  
     const formData = new FormData();
-    
-    // Append metadata as JSON string
-    formData.append('metadata', JSON.stringify(metadata));
-    
-    // Append files
+    formData.append('metadata', JSON.stringify({
+      ...metadata,
+      courseName: courseDetails?.courseName || ""
+    }));
+  
     selectedFiles.forEach(fileObj => {
       formData.append('files', fileObj.file);
     });
-
+  
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  
       const response = await fetch('/api/lecturer/materials', {
         method: 'POST',
-        body: formData,
         headers: {
-          'lecturer-id': user.id,
-          'X-User-Role': user.role
+          'lecturer-id': user.id || user._id,
+          'X-User-Role': user.role || user._role
         },
-        credentials: 'include'
+        body: formData,
+        credentials: 'include',
+        signal: controller.signal,
       });
-
+  
+      clearTimeout(timeoutId);
+  
       const data = await response.json();
-      
+  
       if (!response.ok) {
         throw new Error(data.message || 'Upload failed');
       }
-
-      alert(`${data.count} material(s) uploaded successfully!`);
+  
+      // ✅ Always try sending notifications
+      const notificationResult = await sendMaterialNotifications(data.materials);
+  
+      toast.success(`✅ Uploaded ${data.count} file(s). ${notificationResult.message}`);
+  
+      // Reset form
       setSelectedFiles([]);
       setMetadata(prev => ({
         ...prev,
         module: "",
         title: "",
         description: "",
-        tags: []
+        tags: [],
       }));
+  
       if (onClose) onClose();
     } catch (error) {
-      console.error('Upload error:', error);
-      setUploadError(error.message);
+      console.error("Upload Error:", error);
+      setUploadError(error.message || "Unknown upload error");
+      toast.error(`❌ Upload failed: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
   };
+  
 
   const getFileIcon = (type) => {
     const icons = {
@@ -329,9 +450,9 @@ export default function UploadMaterials({ courses, onClose }) {
               </button>
               <button
                 type="submit"
-                disabled={selectedFiles.length === 0 || isUploading}
+                disabled={selectedFiles.length === 0 || isUploading || isFetchingStudents}
                 className={`px-4 py-2 rounded-md text-white font-medium ${
-                  selectedFiles.length === 0 || isUploading
+                  selectedFiles.length === 0 || isUploading || isFetchingStudents
                     ? 'bg-blue-400 cursor-not-allowed'
                     : 'bg-blue-600 hover:bg-blue-700'
                 } transition-colors`}
@@ -349,6 +470,12 @@ export default function UploadMaterials({ courses, onClose }) {
                 )}
               </button>
             </div>
+
+            {isFetchingStudents && (
+              <div className="text-sm text-gray-500">
+                Loading student list for notifications...
+              </div>
+            )}
           </>
         ) : (
           <div className="p-4 bg-yellow-50 text-yellow-800 rounded-md">
@@ -356,6 +483,7 @@ export default function UploadMaterials({ courses, onClose }) {
           </div>
         )}
       </form>
+     
     </motion.div>
   );
 }

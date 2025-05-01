@@ -4,7 +4,7 @@ import DashboardOverview from "../Student/Dashboard";
 import OnlineClasses from "../Student/OnlineClass";
 import StudyMaterials from "../Student/StudyMaterial";
 import Assignments from "../Student/Assignments";
-import AccountSettings from "../Student/AccountSetting";
+
 import StudentChat from "../Student/StudentChat";
 import { logoutUser } from "../redux/userSlice";
 import { useDispatch } from "react-redux";
@@ -21,7 +21,7 @@ export default function StudentDashboard() {
     resources: "Study Materials",
     assignments: "Assignments",
     chat: "Chat",
-    settings: "Account Settings",
+    
   };
   const handleLogout = () => {
     dispatch(logoutUser());
@@ -43,8 +43,7 @@ export default function StudentDashboard() {
         return <Assignments />;
       case "chat":
         return <StudentChat />;
-      case "settings":
-        return <AccountSettings />;
+     
       default:
         return <DashboardOverview />;
     }

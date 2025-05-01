@@ -1,10 +1,13 @@
 require("dotenv").config();
+const cookieParser = require('cookie-parser');
 const express = require("express");
 const http = require("http");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const { Server } = require("socket.io");
-
+const { v4: uuidv4 } = require("uuid");
+const jwt = require("jsonwebtoken");
+const Course = require("./Models/CourseModel");
 // Models and Routes
 const authRoutes = require("./Routes/AuthRoute");
 const HodRouter = require("./Routes/hod");
@@ -15,9 +18,16 @@ const Student = require("./Models/Student");
 const Lecturer = require("./Models/LecturerModel");
 const Hod = require("./Models/HodModel");
 const scheduleRouter = require("./Routes/Shedule");
+const StudentRoute = require("./Routes/StudentRoute");
+const authenticate = require("./Routes/AuthMiddlewere");
+const NotifyRouter = require("./Routes/materialUplaodnotify");
+const AssignmentNotify = require("./Routes/AssignmentNotify");
 
 const app = express();
 const server = http.createServer(app);
+
+// Initialize active lectures map
+const activeLectures = new Map();
 
 // Middleware
 app.use(cors({
@@ -28,6 +38,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.static("public"));
 
 // Routes
@@ -35,8 +46,10 @@ app.use("/api/auth", authRoutes);
 app.use("/api/hod", HodRouter);
 app.use("/api/lecturer", LecturerRouter);
 app.use("/api/assignments", AssignmentRouter);
+app.use("/api/assignments", AssignmentNotify);
 app.use("/api/schedule", scheduleRouter);
-
+app.use("/api/notify", NotifyRouter);
+app.use("/api/student", StudentRoute);
 
 // Database Connection
 mongoose.connect(process.env.MONGO_URI, {
@@ -141,48 +154,54 @@ const io = new Server(server, {
 });
 
 // Socket Authentication Middleware
+// Updated Socket Authentication Middleware
 io.use(async (socket, next) => {
   try {
-    const { userId, role, registrationNumber } = socket.handshake.auth;
+    // Get token from either handshake auth or cookies
+    const token = socket.handshake.auth.token || 
+                 socket.handshake.headers.cookie?.split('accessToken=')[1]?.split(';')[0];
     
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      throw new Error("Invalid or missing user ID");
+    if (!token) {
+      console.error('No authentication token provided');
+      return next(new Error('Authentication error: No token provided'));
     }
 
-    if (!['student', 'lecturer', 'HOD'].includes(role)) {
-      throw new Error("Invalid user role specified");
-    }
-
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Check user in appropriate model based on role
     let user;
-    switch (role) {
+    switch (decoded.role) {
       case 'student':
-        user = await Student.findById(userId);
+        user = await Student.findById(decoded.id);
         if (!user) throw new Error("Student not found");
-        if (registrationNumber && user.registrationNumber !== registrationNumber) {
-          throw new Error("Registration number mismatch");
-        }
         break;
       case 'lecturer':
-        user = await Lecturer.findById(userId);
+        user = await Lecturer.findById(decoded.id);
         if (!user) throw new Error("Lecturer not found");
         break;
       case 'HOD':
-        user = await Hod.findById(userId);
+        user = await Hod.findById(decoded.id);
         if (!user) throw new Error("HOD not found");
         break;
+      default:
+        throw new Error("Invalid user role");
     }
 
+    // Attach user data to socket
     socket.userData = {
       id: user._id,
-      role,
+      role: decoded.role,
       name: user.name,
-      ...(role === 'student' && { registrationNumber: user.registrationNumber }),
-      socketId: socket.id
+      ...(decoded.role === 'student' && { 
+        registrationNumber: user.registrationNumber 
+      })
     };
 
+    console.log(`Authenticated ${decoded.role}: ${user.name}`);
     next();
   } catch (error) {
-    console.error("Socket authentication error:", error.message);
+    console.error("Socket authentication failed:", error.message);
     next(new Error(`Authentication failed: ${error.message}`));
   }
 });
@@ -209,16 +228,133 @@ io.on("connection", (socket) => {
   // Message Handlers
   setupMessageHandlers(socket);
 
-  // Disconnection Handler
-  socket.on("disconnect", (reason) => {
-    clearInterval(heartbeatInterval);
-    connectionManager.removeConnection(socket.id);
-    console.log(`User disconnected: ${socket.id} (${socket.userData.role}:${socket.userData.id}) - Reason: ${reason}`);
+  // Lecture Room Handlers
+  socket.on("create-lecture", ({ courseId }) => {
+    const lectureId = uuidv4();
+    const lecturerId = socket.userData.id;
+    
+    const lecture = {
+      id: lectureId,
+      courseId,
+      lecturerId,
+      lecturerName: socket.userData.name, // Add lecturer name
+      courseName: "Course Name",         // You'll need to fetch this from your DB
+      participants: new Map(),
+      createdAt: new Date(),
+      isActive: true
+    };
+    
+    activeLectures.set(lectureId, lecture);
+    socket.join(lectureId);
+    
+    // Broadcast to all clients
+    io.emit("lecture-created", {
+      ...lecture,
+      participantCount: 0
+    });
+    
+    console.log(`Lecture ${lectureId} created by ${lecturerId}`);
+  });
+
+  socket.on("join-lecture", ({ lectureId }) => {
+    const lecture = activeLectures.get(lectureId);
+    if (!lecture) {
+      return socket.emit("error", { message: "Lecture not found" });
+    }
+
+    const user = {
+      id: socket.userData.id,
+      name: socket.userData.name,
+      role: socket.userData.role,
+      socketId: socket.id,
+      joinedAt: new Date(),
+      isPresenting: false
+    };
+
+    lecture.participants.set(socket.userData.id, user);
+    socket.join(lectureId);
+    
+    // Notify all participants about new attendance count
+    io.to(lectureId).emit("attendance-update", {
+      count: lecture.participants.size,
+      participants: Array.from(lecture.participants.values())
+    });
+
+    console.log(`${user.name} joined lecture ${lectureId}`);
+  });
+
+  socket.on("request-presentation", ({ lectureId }) => {
+    const lecture = activeLectures.get(lectureId);
+    if (!lecture) return;
+
+    // Only lecturer can approve presentation requests
+    io.to(lecture.lecturerId).emit("presentation-request", {
+      studentId: socket.userData.id,
+      studentName: socket.userData.name
+    });
+  });
+
+  socket.on("approve-presentation", ({ lectureId, studentId }) => {
+    const lecture = activeLectures.get(lectureId);
+    if (!lecture || socket.userData.id !== lecture.lecturerId) return;
+
+    const student = lecture.participants.get(studentId);
+    if (student) {
+      student.isPresenting = true;
+      io.to(student.socketId).emit("presentation-approved");
+      io.to(lectureId).emit("presentation-started", {
+        presenterId: studentId,
+        presenterName: student.name
+      });
+    }
+  });
+
+  socket.on("stop-presentation", ({ lectureId }) => {
+    const lecture = activeLectures.get(lectureId);
+    if (!lecture) return;
+
+    // Lecturer can stop any presentation
+    if (socket.userData.id === lecture.lecturerId) {
+      for (const [id, participant] of lecture.participants) {
+        if (participant.isPresenting) {
+          participant.isPresenting = false;
+          io.to(participant.socketId).emit("presentation-stopped");
+          break;
+        }
+      }
+    } 
+    // Presenter can stop their own presentation
+    else if (lecture.participants.get(socket.userData.id)) {
+      const presenter = lecture.participants.get(socket.userData.id);
+      if (presenter.isPresenting) {
+        presenter.isPresenting = false;
+        io.to(lectureId).emit("presentation-stopped");
+      }
+    }
   });
 
   // Error Handler
   socket.on("error", (error) => {
     console.error(`Socket error for ${socket.id}:`, error);
+  });
+
+  // Disconnection Handler
+  socket.on("disconnect", (reason) => {
+    clearInterval(heartbeatInterval);
+    connectionManager.removeConnection(socket.id);
+    
+    // Clean up lecture participation on disconnect
+    for (const [lectureId, lecture] of activeLectures) {
+      if (lecture.participants.has(socket.userData.id)) {
+        lecture.participants.delete(socket.userData.id);
+        io.to(lectureId).emit("attendance-update", {
+          count: lecture.participants.size,
+          participants: Array.from(lecture.participants.values())
+        });
+      }
+    }
+    
+    console.log(`User disconnected: ${socket.id} (${socket.userData.role}:${socket.userData.id}) - Reason: ${reason}`);
   });
 });
 
@@ -386,38 +522,206 @@ async function getUserById(userId) {
 }
 
 // REST API Endpoints
-app.get("/api/connections/status", (req, res) => {
-  try {
-    const now = new Date();
-    const connections = connectionManager.getActiveConnections().map(conn => ({
-      id: conn.id,
-      role: conn.role,
-      name: conn.name,
-      socketId: conn.socket.id,
-      connectedAt: conn.connectedAt,
-      lastActive: conn.lastActive,
-      inactiveSeconds: Math.round((now - conn.lastActive) / 1000),
-      heartbeatCount: conn.heartbeatCount
-    }));
 
-    res.json({
-      status: "success",
-      data: {
-        totalConnections: connections.length,
-        connections
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Failed to get connection status"
-    });
-  }
-});
+
 
 // Start Server
 const PORT = process.env.PORT || 8000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`WebSocket server available at ws://localhost:${PORT}`);
+});
+
+
+
+
+
+
+// API endpoint for active lectures
+// GET: List all active lectures
+app.get('/api/lectures/active', (req, res) => {
+  try {
+    const lectures = Array.from(activeLectures.values()).map(lecture => ({
+      id: lecture.id,
+      courseId: lecture.courseId,
+      courseName: lecture.courseName,
+      lecturerId: lecture.lecturerId,
+      lecturerName: lecture.lecturerName,
+      participantCount: lecture.participants.size,
+      createdAt: lecture.createdAt
+    }));
+    
+    res.json({
+      success: true,
+      lectures: lectures
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch active lectures'
+    });
+  }
+});
+
+
+// Add this with your other routes
+app.post('/api/lectures/start', async (req, res) => {
+  try {
+    const { courseId, lecturerId } = req.body;
+    
+    // Validate input
+    if (!courseId || !lecturerId) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Both courseId and lecturerId are required' 
+      });
+    }
+
+    // Find course and lecturer
+    const course = await Course.findById(courseId).select('name code');
+    if (!course) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Course not found' 
+      });
+    }
+
+    const lecturer = await Lecturer.findById(lecturerId).select('name email');
+    if (!lecturer) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Lecturer not found' 
+      });
+    }
+
+    // Create lecture
+    const lectureId = uuidv4();
+    const lecture = {
+      id: lectureId,
+      courseId,
+      courseName: course.name,
+      courseCode: course.code,
+      lecturerId,
+      lecturerName: lecturer.name,
+      lecturerEmail: lecturer.email,
+      participants: new Map(),
+      createdAt: new Date()
+    };
+
+    activeLectures.set(lectureId, lecture);
+    
+    // Broadcast to all clients
+    io.emit('lecture-created', {
+      ...lecture,
+      participantCount: 0
+    });
+
+    // Return consistent response structure
+    res.json({ 
+      success: true,
+      lectureId,
+      lecture: { // Include the full lecture object
+        id: lectureId,
+        courseId,
+        courseName: course.name,
+        courseCode: course.code,
+        lecturerId,
+        lecturerName: lecturer.name
+      },
+      message: 'Lecture started successfully'
+    });
+
+  } catch (error) {
+    console.error('Lecture start error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error',
+      details: error.message 
+    });
+  }
+});
+
+
+
+
+// POST: Student joins lecture (must match frontend expectation)
+app.post('/api/lectures/:lectureId/join', async (req, res) => {
+  try {
+    const { lectureId } = req.params;
+    const { studentId, studentName } = req.body;
+
+    // Validate input
+    if (!studentId || !studentName) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Student ID and name are required' 
+      });
+    }
+
+    // Check lecture exists
+    if (!activeLectures.has(lectureId)) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Lecture not found or has ended' 
+      });
+    }
+
+    const lecture = activeLectures.get(lectureId);
+
+    // Add student to participants
+    lecture.participants.set(studentId, {
+      id: studentId,
+      name: studentName,
+      joinedAt: new Date()
+    });
+
+    // Broadcast updated participant count
+    io.emit('participant-update', {
+      lectureId,
+      participantCount: lecture.participants.size
+    });
+
+    res.json({ 
+      success: true,
+      lectureId,
+      courseName: lecture.courseName,
+      lecturerName: lecture.lecturerName
+    });
+
+  } catch (error) {
+    res.status(500).json({ 
+      success: false,
+      error: 'Error joining lecture' 
+    });
+  }
+});
+
+// GET: Get lecture info (matches frontend expectation)
+app.get('/api/lectures/:lectureId/info', (req, res) => {
+  try {
+    const { lectureId } = req.params;
+
+    if (!activeLectures.has(lectureId)) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Lecture not found or has ended' 
+      });
+    }
+
+    const lecture = activeLectures.get(lectureId);
+    res.json({
+      success: true,
+      lecture: {
+        id: lecture.id,
+        courseName: lecture.courseName,
+        lecturerName: lecture.lecturerName,
+        participantCount: lecture.participants.size
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error fetching lecture info' 
+    });
+  }
 });

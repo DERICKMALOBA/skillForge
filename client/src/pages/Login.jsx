@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import axios from "axios";
 
 // Redux actions (replace these with your actual ones)
-import { loginStart, loginSuccess, loginFailure } from "../redux/userSlice"; // adjust path accordingly
+import { loginStart, loginSuccess, loginFailure } from "../Redux/UserSlice"; // adjust path accordingly
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -57,8 +57,8 @@ const Login = () => {
 
       dispatch(loginSuccess({ user, token }));
 
-      localStorage.setItem("token", token);
-      localStorage.setItem("userRole", user.role);
+      sessionStorage.setItem("token", token);
+      sessionStorage.setItem("userRole", user.role);
 
       toast.success("Login successful!");
 

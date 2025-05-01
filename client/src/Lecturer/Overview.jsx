@@ -7,10 +7,82 @@ import UploadMaterials from "./materialUpload"; // Make sure to import this comp
 export default function Overview({ user }) {
   const navigate = useNavigate();
   const [courses, setCourses] = useState([]);
+  const [schedules, setSchedules] = useState([]);
+
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [materials, setMaterials] = useState([]);
   const [showUploadModal, setShowUploadModal] = useState(false); // Added missing state
+
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        console.groupCollapsed('[FRONTEND] User Data Verification');
+        console.log('Full user object:', JSON.stringify(user, null, 2));
+        console.log(user)
+        
+        if (!user) {
+          throw new Error('User session not loaded. Please wait...');
+        }
+  
+        if (!user._id) {
+          throw new Error('Your session is incomplete. Please log in again.');
+        }
+  
+        if (user.role !== 'lecturer') {
+          throw new Error('This feature is only available for lecturers');
+        }
+        console.groupEnd();
+  
+        const lecturerId = String(user._id).trim();
+  
+        // ✅ Fetch courses
+        const response = await fetch("/api/lecturer/my-courses", {
+          headers: {
+            'lecturer-id': lecturerId,
+            'Content-Type': 'application/json',
+            'X-User-Role': user.role
+          },
+          credentials: 'include'
+        });
+  
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Course fetch failed');
+        }
+  
+        const coursesData = await response.json();
+        setCourses(coursesData);
+  
+        // ✅ Fetch schedules
+        const scheduleRes = await fetch(`/api/schedule/schedules/${lecturerId}`);
+        if (!scheduleRes.ok) {
+          const scheduleError = await scheduleRes.json();
+          throw new Error(scheduleError.message || "Failed to fetch schedules");
+        }
+        const scheduleData = await scheduleRes.json();
+        setSchedules(scheduleData.schedules || []);
+        console.log("[FRONTEND] Successfully fetched schedules:", scheduleData.schedules);
+  
+      } catch (error) {
+        console.error('[FRONTEND] Operation Failed:', error.message);
+        setError(error.message);
+        setCourses([]);
+        setAnnouncements([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+  
+    if (user?.role === 'lecturer') {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, [user]);
+  
 
   useEffect(() => {
     const fetchData = async () => {
@@ -94,6 +166,51 @@ export default function Overview({ user }) {
     setShowUploadModal(true);
   };
 
+
+  useEffect(() => {
+    const fetchMaterials = async () => {
+      try {
+    
+        const lecturerId = String(user._id).trim();
+        
+     
+        const queryParams = new URLSearchParams();
+     
+  
+        const res = await fetch(`/api/lecturer/materials?${queryParams}`, {
+          method: "GET", // Changed to GET to match backend
+          headers: {
+            "Content-Type": "application/json",
+            "Lecturer-Id": lecturerId, 
+            "X-User-Role": "lecturer"
+          }
+        });
+  
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+  
+        const data = await res.json();
+        if (data.success) {
+          setMaterials(data.materials);
+        } else {
+          console.error("Failed to load materials:", data.message);
+          console.log("materials",data)
+          console.log(materials)
+        }
+      } catch (err) {
+        console.error("Error fetching materials:", err);
+        // Consider setting error state for UI feedback
+      } finally {
+        setLoading(false);
+      }
+    };
+  
+    fetchMaterials();
+  }, []); // Add dependencies if needed
+  
+  const totalMaterials = materials.length;
+
   if (loading) return <div>Loading...</div>;
 
   return (
@@ -110,7 +227,8 @@ export default function Overview({ user }) {
         value={`${courses.length} Assigned`} 
       />
       <StatCard icon={<FaVideo />} title="Live Lectures Today" value="2 Scheduled" />
-      <StatCard icon={<FaUpload />} title="Uploaded Resources" value="15 Materials" />
+      <StatCard icon={<FaUpload />} title="Uploaded Resources" value={`${totalMaterials} Materials`} />
+
 
       {/* Second Row: Assignments, Messages & Lectures */}
       <StatCard icon={<FaTasks />} title="Pending Assignments" value="3 to Grade" />

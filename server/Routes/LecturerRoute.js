@@ -1,4 +1,3 @@
-const nodemailer = require("nodemailer");
 const express = require("express");
 const LecturerRouter = express.Router();
 const Lecturer = require("../Models/LecturerModel");
@@ -6,22 +5,11 @@ const Course = require("../Models/CourseModel");
 const Material = require("../Models/MaterialModel");
 const Announcement = require("../Models/Announcements");
 const mongoose = require('mongoose');
-const Student = require("../Models/Student");
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { promisify } = require('util');
 const unlinkAsync = promisify(fs.unlink);
-
-
-// Example using Gmail - replace with your SMTP config
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USERNAME, // e.g., your-email@gmail.com
-    pass: process.env.EMAIL_PASSWORD, // App-specific password if using Gmail
-  },
-});
 
 // Configure storage for file uploads
 const storage = multer.diskStorage({
@@ -117,7 +105,6 @@ LecturerRouter.use(async (req, res, next) => {
 });
 
 // Materials Upload Endpoint
-// Materials Upload Endpoint with Email Notifications
 LecturerRouter.post("/materials", upload.array('files'), async (req, res) => {
   if (!req.files?.length) {
     return res.status(400).json({
@@ -147,7 +134,7 @@ LecturerRouter.post("/materials", upload.array('files'), async (req, res) => {
   }
 
   try {
-    // Validate lecturer's access to the course
+    // OPTION 1: Validate by checking lecturer's courses array
     const isValidCourse = req.lecturer.courses.some(course => 
       course.toString() === courseId
     );
@@ -209,7 +196,6 @@ LecturerRouter.post("/materials", upload.array('files'), async (req, res) => {
       };
     }));
 
-    // Send success response first
     res.status(201).json({
       success: true,
       message: `${materials.length} material(s) uploaded successfully`,
@@ -217,70 +203,10 @@ LecturerRouter.post("/materials", upload.array('files'), async (req, res) => {
       materials
     });
 
-    // Then send email notifications to enrolled students (non-blocking)
-    const enrolledStudents = await Student.find({ courses: course._id }).select("email name").lean();
-
-    if (enrolledStudents.length > 0) {
-      const emailPromises = enrolledStudents.map(student => {
-        const mailOptions = {
-          from: `"${req.lecturer.name}" <${process.env.EMAIL_USERNAME}>`,
-          to: student.email,
-          subject: `📚 New Material Uploaded: ${title} - ${course.courseName}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; line-height: 1.6; max-width: 600px; margin: 0 auto;">
-              <h2 style="color: #2c3e50;">New Course Material Available</h2>
-              <p>Dear ${student.name},</p>
-              
-              <div style="background: #f9f9f9; padding: 15px; border-left: 4px solid #3498db; margin: 15px 0;">
-                <p><strong>Course:</strong> ${course.courseName} (${course.courseCode})</p>
-                <p><strong>Lecturer:</strong> ${req.lecturer.name}</p>
-                <p><strong>Material Title:</strong> ${title}</p>
-                ${module ? `<p><strong>Module:</strong> ${module}</p>` : ''}
-                ${description ? `<p><strong>Description:</strong> ${description}</p>` : ''}
-              </div>
-              
-              <p>This material is now available in your course portal. Please log in to access it.</p>
-              
-              <p style="margin-top: 30px;">
-                Best regards,<br>
-                <strong>${process.env.INSTITUTION_NAME || 'University LMS'} Team</strong>
-              </p>
-              
-              <div style="margin-top: 20px; font-size: 12px; color: #7f8c8d; border-top: 1px solid #eee; padding-top: 10px;">
-                <p>This is an automated notification. Please do not reply to this email.</p>
-              </div>
-            </div>
-          `
-        };
-
-        return transporter.sendMail(mailOptions)
-          .then(info => {
-            console.log(`Email sent to ${student.email}: ${info.messageId}`);
-            return info;
-          })
-          .catch(err => {
-            console.error(`Failed to send to ${student.email}:`, err.message);
-            return null;
-          });
-      });
-
-      // Process emails in background
-      Promise.all(emailPromises)
-        .then(results => {
-          const successful = results.filter(r => r !== null).length;
-          console.log(`Notifications sent: ${successful}/${enrolledStudents.length}`);
-        })
-        .catch(err => {
-          console.error('Error processing email notifications:', err);
-        });
-    }
-
   } catch (error) {
-    // Clean up uploaded files if error occurs
     if (req.files) {
       await Promise.all(req.files.map(file => unlinkAsync(file.path).catch(console.error)));
     }
-    
     console.error('Upload error:', error);
     res.status(500).json({
       message: "Upload failed",
@@ -291,7 +217,147 @@ LecturerRouter.post("/materials", upload.array('files'), async (req, res) => {
 });
 
 
+LecturerRouter.get("/materials", async (req, res) => {
+  try {
+    const filters = {};
 
+    // Use authenticated lecturer from middleware
+    if (req.lecturer?._id) {
+      filters.lecturer = req.lecturer._id;
+    }
+
+    if (req.query.courseId) {
+      filters.course = req.query.courseId;
+    }
+
+    if (req.query.visibility) {
+      filters.visibility = req.query.visibility;
+    }
+
+    const materials = await Material.find(filters)
+      .populate("course", "name code")
+      .populate("lecturer", "name email")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: materials.length,
+      materials,
+    });
+  } catch (error) {
+    console.error("Failed to fetch materials:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching materials",
+      error: error.message,
+    });
+  }
+});
+
+
+
+// Material Download Endpoint
+LecturerRouter.get("/materials/download/:materialId", async (req, res) => {
+  try {
+    const { materialId } = req.params;
+
+    const material = await Material.findById(materialId);
+    if (!material) {
+      return res.status(404).json({
+        message: "Material not found",
+        details: "The specified material does not exist"
+      });
+    }
+
+    // Verify access - either the lecturer owns it or it's public
+    const isOwner = material.lecturer.toString() === req.lecturer?._id?.toString();
+    const isPublic = material.visibility === 'public';
+    
+    if (!isOwner && !isPublic) {
+      return res.status(403).json({
+        message: "Access denied",
+        details: "You don't have permission to access this material"
+      });
+    }
+
+    // Check if file exists
+    const fileExists = await fs.promises.access(material.storagePath)
+      .then(() => true)
+      .catch(() => false);
+
+    if (!fileExists) {
+      return res.status(404).json({
+        message: "File not found",
+        details: "The file is no longer available"
+      });
+    }
+
+    // Set headers and send file
+    res.setHeader('Content-Disposition', `attachment; filename="${material.originalName}"`);
+    res.setHeader('Content-Type', material.mimeType);
+    res.setHeader('Content-Length', material.fileSize);
+
+    const fileStream = fs.createReadStream(material.storagePath);
+    fileStream.pipe(res);
+
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({
+      message: "Download failed",
+      error: error.message,
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    });
+  }
+});
+
+// Material Delete Endpoint
+LecturerRouter.delete("/materials/:materialId", async (req, res) => {
+  try {
+    const { materialId } = req.params;
+
+    // Find the material
+    const material = await Material.findById(materialId);
+    if (!material) {
+      return res.status(404).json({
+        message: "Material not found",
+        details: "The specified material does not exist"
+      });
+    }
+
+    // Verify ownership
+    if (material.lecturer.toString() !== req.lecturer._id.toString()) {
+      return res.status(403).json({
+        message: "Access denied",
+        details: "You can only delete your own materials"
+      });
+    }
+
+    // Delete the file from storage
+    await unlinkAsync(material.storagePath);
+
+    // Remove material reference from course
+    await Course.findByIdAndUpdate(
+      material.course,
+      { $pull: { materials: material._id } }
+    );
+
+    // Delete the material record
+    await Material.findByIdAndDelete(materialId);
+
+    res.status(200).json({
+      success: true,
+      message: "Material deleted successfully"
+    });
+
+  } catch (error) {
+    console.error('Delete material error:', error);
+    res.status(500).json({
+      message: "Failed to delete material",
+      error: error.message,
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    });
+  }
+});
 // Courses Endpoint
 
 LecturerRouter.get("/my-courses", async (req, res) => {
