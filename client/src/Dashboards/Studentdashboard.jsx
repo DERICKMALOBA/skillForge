@@ -6,7 +6,7 @@ import StudyMaterials from "../Student/StudyMaterial";
 import Assignments from "../Student/Assignments";
 
 import StudentChat from "../Student/StudentChat";
-import { logoutUser } from "../redux/userSlice";
+import { logoutUser } from "../Redux/UserSlice";
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";

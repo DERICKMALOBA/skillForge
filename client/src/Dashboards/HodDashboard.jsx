@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useSelector } from "react-redux";
-import { Bell, Users, FileText, BookOpen } from "lucide-react";
-import { logoutUser } from "../redux/userSlice";
+import { Users, BookOpen,  LogOut } from "lucide-react";
+import { logoutUser } from "../Redux/UserSlice";
 import { useDispatch } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -17,20 +17,18 @@ const HODDashboard = () => {
   const [selectedLecturer, setSelectedLecturer] = useState("");
   const [newCourse, setNewCourse] = useState("");
   const [courseCode, setCourseCode] = useState("");
-    const dispatch = useDispatch();
-    const navigate = useNavigate();
-  
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
 
+  const handleLogout = () => {
+    dispatch(logoutUser());
+    localStorage.removeItem("token");
+    localStorage.removeItem("userRole");
+    toast.success("Logged out successfully");
+    navigate("/login");
+  };
 
-    const handleLogout = () => {
-      dispatch(logoutUser());
-      localStorage.removeItem("token");
-      localStorage.removeItem("userRole");
-      toast.success("Logged out successfully");
-      navigate("/login");
-    };
-
-//fetch announcements
+  //fetch announcements
   useEffect(() => {
     const fetchAnnouncements = async () => {
       try {
@@ -44,7 +42,7 @@ const HODDashboard = () => {
         console.error("Error fetching announcements:", error);
       }
     };
-  
+
     fetchAnnouncements();
   }, []);
 
@@ -61,7 +59,7 @@ const HODDashboard = () => {
         setLecturers([]); // Fallback to empty array
       }
     };
-  
+
     const fetchStudents = async () => {
       try {
         const response = await fetch(`/api/hod/students`);
@@ -73,7 +71,7 @@ const HODDashboard = () => {
         setStudents([]); // Fallback to empty array
       }
     };
-  
+
     const fetchCourses = async () => {
       try {
         const response = await fetch("/api/hod/courses");
@@ -85,7 +83,7 @@ const HODDashboard = () => {
         setCourses([]); // Fallback to empty array
       }
     };
-  
+
     // Call all fetch functions
     fetchLecturers();
     fetchStudents();
@@ -163,168 +161,237 @@ const HODDashboard = () => {
       .catch((err) => console.error(err));
   };
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       {/* Header */}
-      <header className="flex justify-between items-center bg-white p-4 shadow-md rounded-lg">
-        <div className="flex items-center space-x-4">
-          <button className="flex items-center px-4 py-2 border rounded">
-            <Bell className="w-5 h-5 mr-2" /> Notifications
-          </button>
+      <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 shadow-sm rounded-xl mb-8">
+        <div className="flex items-center space-x-4 mb-4 md:mb-0">
+          <div className="bg-indigo-100 p-3 rounded-full">
+            <Users className="w-6 h-6 text-indigo-600" />
+          </div>
           <div>
-            <h1 className="text-xl font-semibold">{user?.name}</h1>
-            <p className="text-sm text-gray-600">{user?.email}</p>
+            <h1 className="text-xl font-semibold text-gray-800">
+              {user?.name}
+            </h1>
+            <p className="text-sm text-gray-500">{user?.email}</p>
           </div>
         </div>
-        <h1 className="text-2xl font-semibold">HOD Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-800">HOD Dashboard</h1>
       </header>
 
-      {/* Overview Sections */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-        {/* Lecturers Section */}
-        <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-          <div className="flex flex-col items-center">
-            <h3 className="text-lg font-medium">Total Lecturers</h3>
-            <p className="text-2xl font-bold">{lecturers.length}</p>
-            <button className="mt-2 text-blue-700 px-3 py-1 rounded text-sm hover:underline">
-              View Lecturers
-            </button>
+      {/* Overview Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* Lecturers Card */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-600">
+                Total Lecturers
+              </h3>
+              <p className="text-3xl font-bold text-blue-600 mt-2">
+                {lecturers.length}
+              </p>
+              <button className="mt-4 text-blue-600 hover:text-blue-800 font-medium text-sm flex items-center">
+              </button>
+            </div>
+            <div className="bg-blue-50 p-3 rounded-full">
+              <Users className="w-8 h-8 text-blue-500" />
+            </div>
           </div>
-          <Users className="w-12 h-12 text-blue-500 ml-4" />
         </div>
 
-        {/* Students Section */}
-        <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-          <div className="flex flex-col items-center">
-            <h3 className="text-lg font-medium">Total Students</h3>
-            <p className="text-2xl font-bold">{students.length}</p>
-            <button className="mt-2 text-green-700 px-3 py-1 rounded text-sm hover:underline">
-              View Students
-            </button>
+        {/* Students Card */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-600">
+                Total Students
+              </h3>
+              <p className="text-3xl font-bold text-green-600 mt-2">
+                {students.length}
+              </p>
+              <button className="mt-4 text-green-600 hover:text-green-800 font-medium text-sm flex items-center">
+              </button>
+            </div>
+            <div className="bg-green-50 p-3 rounded-full">
+              <Users className="w-8 h-8 text-green-500" />
+            </div>
           </div>
-          <Users className="w-12 h-12 text-green-500 ml-4" />
         </div>
 
-        {/* Courses Section */}
-        <div className="bg-white p-4 rounded shadow flex justify-between items-center">
-          <div className="flex flex-col items-center">
-            <h3 className="text-lg font-medium">Total Courses</h3>
-            <p className="text-2xl font-bold">{courses.length}</p>
-            <button className="mt-2 text-purple-700 px-3 py-1 rounded text-sm hover:underline">
-              View Courses
-            </button>
+        {/* Courses Card */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-600">
+                Total Courses
+              </h3>
+              <p className="text-3xl font-bold text-purple-600 mt-2">
+                {courses.length}
+              </p>
+              <button className="mt-4 text-purple-600 hover:text-purple-800 font-medium text-sm flex items-center">
+              </button>
+            </div>
+            <div className="bg-purple-50 p-3 rounded-full">
+              <BookOpen className="w-8 h-8 text-purple-500" />
+            </div>
           </div>
-          <BookOpen className="w-12 h-12 text-purple-500 ml-4" />
         </div>
       </div>
 
-      {/* Assign Lecturer to Course and Add Course */}
-     {/* Assign Lecturer to Course and Add Course */}
-<div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-  {/* Assign Lecturer to Course */}
-  <section className="bg-white p-6 rounded shadow">
-    <h2 className="text-xl font-semibold mb-4">Assign Lecturer to Course</h2>
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <select
-          className="border p-2 rounded w-full"
-          onChange={(e) => setSelectedCourse(e.target.value)}
-        >
-          <option value="">Select Course</option>
-          {courses.map((course) => (
-            <option key={course._id} value={course._id}>
-              {course.courseCode} - {course.courseName}
-            </option>
-          ))}
-        </select>
+      {/* Action Sections */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Assign Lecturer to Course */}
+        <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-semibold text-gray-800 mb-6 pb-2 border-b border-gray-100">
+            Assign Lecturer to Course
+          </h2>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Course
+                </label>
+                <select
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={(e) => setSelectedCourse(e.target.value)}
+                >
+                  <option value="">Select Course</option>
+                  {courses.map((course) => (
+                    <option key={course._id} value={course._id}>
+                      {course.courseCode} - {course.courseName}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        <select
-          className="border p-2 rounded w-full"
-          onChange={(e) => setSelectedLecturer(e.target.value)}
-        >
-          <option value="">Select Lecturer</option>
-          {lecturers.map((lecturer) => (
-            <option key={lecturer._id} value={lecturer._id}>
-              {lecturer.name}
-            </option>
-          ))}
-        </select>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Lecturer
+                </label>
+                <select
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={(e) => setSelectedLecturer(e.target.value)}
+                >
+                  <option value="">Select Lecturer</option>
+                  {lecturers.map((lecturer) => (
+                    <option key={lecturer._id} value={lecturer._id}>
+                      {lecturer.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
+              <button
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                onClick={assignLecturer}
+              >
+                Assign Lecturer
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Add Course */}
+        <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-xl font-semibold text-gray-800 mb-6 pb-2 border-b border-gray-100">
+            Add New Course
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Course Name
+              </label>
+              <input
+                type="text"
+                placeholder="Enter course name"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                value={newCourse}
+                onChange={(e) => setNewCourse(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Course Code
+              </label>
+              <input
+                type="text"
+                placeholder="Enter course code"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                value={courseCode}
+                onChange={(e) => setCourseCode(e.target.value)}
+              />
+            </div>
+
+            <button
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+              onClick={addCourse}
+            >
+              Add Course
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {/* Announcements Section */}
+      <section className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-8">
+        <h2 className="text-xl font-semibold text-gray-800 mb-6 pb-2 border-b border-gray-100">
+          Announcements
+        </h2>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              New Announcement
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter announcement"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={newAnnouncement}
+                onChange={(e) => setNewAnnouncement(e.target.value)}
+              />
+              <button
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg transition-colors"
+                onClick={addAnnouncement}
+              >
+                Post
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <h3 className="text-lg font-medium text-gray-700 mb-3">
+              Recent Announcements
+            </h3>
+            <ul className="space-y-3">
+              {announcements.map((ann, index) => (
+                <li
+                  key={index}
+                  className="p-3 bg-gray-50 rounded-lg border border-gray-200"
+                >
+                  <div className="flex justify-between items-start">
+                    <p className="text-gray-800">{ann.message}</p>
+                    <span className="text-xs text-gray-500">
+                      {new Date(ann.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* Logout Button */}
+      <div className="flex justify-end">
         <button
-          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded w-full"
-          onClick={assignLecturer}
+          onClick={handleLogout}
+          className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-800 font-medium"
         >
-          Assign
+          <LogOut className="w-5 h-5" />
+          Logout
         </button>
-      </div>
-    </div>
-  </section>
-
-  {/* Add Course */}
-  <section className="bg-white p-6 rounded shadow">
-    <h2 className="text-xl font-semibold mb-4">Add Course</h2>
-    <div className="space-y-3">
-      <input
-        type="text"
-        placeholder="New course name..."
-        className="border p-2 rounded w-full"
-        value={newCourse}
-        onChange={(e) => setNewCourse(e.target.value)}
-      />
-      <input
-        type="text"
-        placeholder="Course code..."
-        className="border p-2 rounded w-full"
-        value={courseCode}
-        onChange={(e) => setCourseCode(e.target.value)}
-      />
-      <button
-        className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded w-full mt-2"
-        onClick={addCourse}
-      >
-        Add Course
-      </button>
-    </div>
-  </section>
-</div>
-
-      {/* Announcements and Reports */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        {/* Announcements */}
-        <section className="bg-white p-6 rounded shadow">
-          <h2 className="text-xl font-semibold mb-4">Announcements</h2>
-          <input
-            type="text"
-            placeholder="New announcement..."
-            className="border p-2 w-full"
-            value={newAnnouncement}
-            onChange={(e) => setNewAnnouncement(e.target.value)}
-          />
-          <button
-            className="bg-green-500 text-white px-4 py-2 rounded mt-2"
-            onClick={addAnnouncement}
-          >
-            Add Announcement
-          </button>
-
-          <ul className="mt-4">
-            {announcements.map((ann, index) => (
-              <li key={index} className="border-b p-2">
-                {ann.message}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {/* Reports */}
-        <section className="bg-white p-6 rounded shadow">
-          <h2 className="text-xl font-semibold mb-4">Reports</h2>
-          <button className="bg-gray-500 text-white px-4 py-2 rounded flex items-center">
-            <FileText className="w-5 h-5 mr-2" /> Download Report
-          </button>
-          <button onClick={handleLogout}>
-            logout
-          </button>
-        </section>
       </div>
     </div>
   );

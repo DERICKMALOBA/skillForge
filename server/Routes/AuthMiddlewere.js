@@ -6,13 +6,13 @@ const authenticate = async (req, res, next) => {
     if (!token) {
       return res.status(401).json({ error: 'Authentication required' });
     }
-    console.log("token from auth",token);
+   
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
   } catch (error) {
-    console.error('Authentication error:', error);
+    
     
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ 

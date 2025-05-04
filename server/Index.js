@@ -21,7 +21,6 @@ const scheduleRouter = require("./Routes/Shedule");
 const StudentRoute = require("./Routes/StudentRoute");
 const authenticate = require("./Routes/AuthMiddlewere");
 const NotifyRouter = require("./Routes/materialUplaodnotify");
-const AssignmentNotify = require("./Routes/AssignmentNotify");
 
 const app = express();
 const server = http.createServer(app);
@@ -46,7 +45,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/hod", HodRouter);
 app.use("/api/lecturer", LecturerRouter);
 app.use("/api/assignments", AssignmentRouter);
-app.use("/api/assignments", AssignmentNotify);
+
 app.use("/api/schedule", scheduleRouter);
 app.use("/api/notify", NotifyRouter);
 app.use("/api/student", StudentRoute);
@@ -73,7 +72,7 @@ class ConnectionManager {
     if (userConnections.length >= this.maxConnectionsPerUser) {
       const oldestConnection = userConnections[0];
       oldestConnection.socket.disconnect(true);
-      console.log(`Closed oldest connection for ${userId} (${oldestConnection.socket.id})`);
+     
     }
 
     const connectionData = {
@@ -87,7 +86,7 @@ class ConnectionManager {
     this.connections.set(socket.id, connectionData);
     this.updateUserConnections(userId, socket.id, connectionData);
 
-    console.log(`Added connection for ${userId} (${socket.id}), total: ${userConnections.length + 1}`);
+    
     return true;
   }
 
@@ -107,7 +106,7 @@ class ConnectionManager {
       this.userConnections.delete(userId);
     }
 
-    console.log(`Removed connection ${socketId} for ${userId}, remaining: ${updatedConnections.length}`);
+   
   }
 
   getUserConnections(userId) {
@@ -162,7 +161,7 @@ io.use(async (socket, next) => {
                  socket.handshake.headers.cookie?.split('accessToken=')[1]?.split(';')[0];
     
     if (!token) {
-      console.error('No authentication token provided');
+     
       return next(new Error('Authentication error: No token provided'));
     }
 
@@ -198,7 +197,7 @@ io.use(async (socket, next) => {
       })
     };
 
-    console.log(`Authenticated ${decoded.role}: ${user.name}`);
+   
     next();
   } catch (error) {
     console.error("Socket authentication failed:", error.message);
@@ -208,11 +207,32 @@ io.use(async (socket, next) => {
 
 // Socket Connection Handler
 io.on("connection", (socket) => {
-  console.log(`User connected: ${socket.id} (${socket.userData.role}:${socket.userData.id})`);
+  
 
   // Add to connection manager
   connectionManager.addConnection(socket);
+// Inside io.on("connection", (socket) => { ... })
 
+// Raised Hand Handler
+socket.on('raise-hand', ({ lectureId, isRaised }) => {
+  const lecture = activeLectures.get(lectureId);
+  if (!lecture) return;
+
+  // Update raised hand state for this user
+  const participant = lecture.participants.get(socket.userData.id);
+  if (participant) {
+    participant.isHandRaised = isRaised;
+    
+    // Broadcast to all in the lecture room
+    io.to(lectureId).emit('hand-updated', {
+      userId: socket.userData.id,
+      isRaised,
+      participantName: socket.userData.name
+    });
+    
+    console.log(`${socket.userData.name} ${isRaised ? 'raised' : 'lowered'} hand`);
+  }
+});
   // Setup heartbeat
   const heartbeatInterval = setInterval(() => {
     if (socket.connected) {
@@ -227,6 +247,26 @@ io.on("connection", (socket) => {
 
   // Message Handlers
   setupMessageHandlers(socket);
+
+
+
+
+  // In your socket.io backend
+socket.on('send-chat-message', ({ lectureId, message }) => {
+  const msg = {
+    text: message,
+    user: socket.userData.name,
+    userId: socket.userData.id,
+    timestamp: new Date(),
+    isOwn: false // Will be set to true on sender's client
+  };
+  
+  // Broadcast to all in lecture except sender
+  socket.to(lectureId).emit('receive-chat-message', msg);
+  
+  // Send back to sender with isOwn=true
+  socket.emit('receive-chat-message', { ...msg, isOwn: true });
+});
 
   // Lecture Room Handlers
   socket.on("create-lecture", ({ courseId }) => {
@@ -253,7 +293,7 @@ io.on("connection", (socket) => {
       participantCount: 0
     });
     
-    console.log(`Lecture ${lectureId} created by ${lecturerId}`);
+   
   });
 
   socket.on("join-lecture", ({ lectureId }) => {
@@ -280,7 +320,6 @@ io.on("connection", (socket) => {
       participants: Array.from(lecture.participants.values())
     });
 
-    console.log(`${user.name} joined lecture ${lectureId}`);
   });
 
   socket.on("request-presentation", ({ lectureId }) => {
@@ -354,7 +393,7 @@ io.on("connection", (socket) => {
       }
     }
     
-    console.log(`User disconnected: ${socket.id} (${socket.userData.role}:${socket.userData.id}) - Reason: ${reason}`);
+  
   });
 });
 

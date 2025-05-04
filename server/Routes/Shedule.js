@@ -75,7 +75,7 @@ scheduleRouter.post("/schedule", async (req, res) => {
       schedule: newSchedule,
     });
   } catch (error) {
-    console.error("Schedule creation error:", error);
+   
     res.status(500).json({
       status: "error",
       message: "Failed to create schedule",
@@ -92,8 +92,49 @@ scheduleRouter.get("/schedules/:lecturerId", async (req, res) => {
       .sort({ startTime: 1 });
 
     res.json({ status: "success", schedules });
+    
   } catch (error) {
     console.error("Error fetching schedules:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch schedules",
+      error: error.message,
+    });
+  }
+});
+
+
+// Get schedules for student (all upcoming lectures)
+// Get schedules for student (all upcoming lectures)
+scheduleRouter.get("/student-schedules", async (req, res) => {
+  try {
+    // Get current date/time
+    const now = new Date();
+    
+    // Find all schedules that haven't happened yet
+    const schedules = await Schedule.find({ 
+      startTime: { $gte: now } 
+    })
+    .populate("lecturer", "name email")
+    .sort({ startTime: 1 })
+    .limit(10); // Limit to 10 upcoming lectures
+
+    res.json({ 
+      status: "success", 
+      schedules: schedules.map(schedule => ({
+        _id: schedule._id,
+        lecturer: schedule.lecturer,
+        students: schedule.students,
+        title: schedule.title,
+        description: schedule.description,
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        createdAt: schedule.createdAt
+      }))
+    });
+    
+  } catch (error) {
+    console.error("Error fetching student schedules:", error);
     res.status(500).json({
       status: "error",
       message: "Failed to fetch schedules",

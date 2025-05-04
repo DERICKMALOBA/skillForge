@@ -29,17 +29,15 @@ const transporter = nodemailer.createTransport({
 // Verify transporter connection
 transporter.verify((error, success) => {
   if (error) {
-    console.error('SMTP Connection Error:', error);
+  
   } else {
-    console.log('SMTP Server is ready to take our messages');
+  
   }
 });
 
 // POST route to send assignment emails
 AssignmentNotify.post("/send-assignment", async (req, res) => {
-  console.log("=== ASSIGNMENT NOTIFICATION REQUEST RECEIVED ===");
-  console.log("Headers:", req.headers);
-  console.log("Request Body:", req.body);
+ 
 
   try {
     const { lecturerId, studentIds, title, description, dueDate, assignmentId, courseId } = req.body;
@@ -63,14 +61,14 @@ AssignmentNotify.post("/send-assignment", async (req, res) => {
     // Get lecturer info
     const lecturer = await Lecturer.findById(lecturerId).select("name title email");
     if (!lecturer) {
-      console.error("Lecturer not found with ID:", lecturerId);
+    
       return res.status(404).json({ message: "Lecturer not found" });
     }
 
     // Get students info
     const students = await Student.find({ _id: { $in: studentIds } }).select("name email");
     if (students.length === 0) {
-      console.error("No students found with the provided IDs");
+    
       return res.status(404).json({ message: "No students found" });
     }
 

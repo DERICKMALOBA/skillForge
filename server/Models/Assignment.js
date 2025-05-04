@@ -77,7 +77,7 @@ const AssignmentSchema = new mongoose.Schema({
   // Reference to the lecturer who created the assignment
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Lecturer',
     required: true
   },
   

@@ -24,6 +24,7 @@ export default function LecturerDashboard() {
   const user = useSelector((state) => state.user.user);
   const [activeSection, setActiveSection] = useState("dashboard");
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  const [currentDate, setCurrentDate] = useState('');
   const [error, setError] = useState(false);
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +34,20 @@ export default function LecturerDashboard() {
   const dispatch = useDispatch();
   const token = useSelector((state) => state.user.token) || localStorage.getItem('token');
 
+
+
+  useEffect(() => {
+    const updateDateTime = () => {
+      const now = new Date();
+      setCurrentTime(now.toLocaleTimeString());
+      setCurrentDate(now.toLocaleDateString()); // e.g., "5/3/2025"
+    };
+
+    updateDateTime(); // Initial call
+    const intervalId = setInterval(updateDateTime, 1000);
+
+    return () => clearInterval(intervalId);
+  }, []);
   
   useEffect(() => {
     const fetchData = async () => {
@@ -338,7 +353,7 @@ export default function LecturerDashboard() {
         animate={{ x: 0 }}
         transition={{ type: "spring", stiffness: 120 }}
       >
-        <h1 className="text-xl font-bold mb-6">Welcome, {user?.name}!</h1>
+        <h1 className="text-xl font-bold mb-6">Welcome, {user?.title}. {user?.name}!</h1>
 
         <nav className="space-y-3 flex-1">
           {Object.keys(sections).map((key) => (
@@ -379,25 +394,24 @@ export default function LecturerDashboard() {
       <div className="flex-1 flex flex-col">
         {/* Navbar */}
         <nav className="flex justify-between items-center bg-blue-900 text-white p-6 shadow-md">
-          <h1 className="text-lg font-bold">Lecturer Dashboard</h1>
-          <div className="flex items-center space-x-4">
-            <p className="text-sm font-semibold">{currentTime}</p>
-            <div className="flex items-center space-x-2">
-              <img
-                src={user?.photo}
-                alt="Lecturer"
-                className="w-10 h-10 rounded-full"
-              />
-              <div>
-                <p className="text-sm font-bold">
-                  {user?.title}
-                  {user?.name}
-                </p>
-                <p className="text-xs text-gray-300">{user?.department}</p>
-              </div>
-            </div>
-          </div>
-        </nav>
+  {/* Left spacer (empty div to balance the flex layout) */}
+  <div className="flex-1"></div>
+  
+  {/* Centered department title */}
+  <h1 className="text-lg text-gray-300 font-bold flex-1 text-center whitespace-nowrap">
+  Department of {user?.department}
+</h1>
+  
+  {/* Right-aligned time and user info */}
+  <div className="flex-1 flex justify-end items-center space-x-4">
+  <p className="text-sm font-semibold ">
+      {currentDate} | {currentTime}
+    </p>
+    <div className="flex items-center space-x-2">
+      {/* User info can go here */}
+    </div>
+  </div>
+</nav>
 
         {/* Content Section */}
         <main className="flex-1 p-8 overflow-auto">

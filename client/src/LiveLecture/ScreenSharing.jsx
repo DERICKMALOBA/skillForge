@@ -7,6 +7,7 @@ const ScreenSharing = ({
   isSharing,
   isLoading = false,
   error = null,
+  isPresenting = false,
 }) => {
   const handleClick = () => {
     if (isLoading) return;
@@ -17,12 +18,12 @@ const ScreenSharing = ({
     <div className="relative flex flex-col items-center">
       <button
         onClick={handleClick}
-        disabled={isLoading}
+        disabled={isLoading || isPresenting}
         className={`p-3 rounded-full transition-all ${
           isSharing
             ? "bg-green-900 hover:bg-green-800"
             : "bg-gray-700 hover:bg-gray-600"
-        } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+        } ${isLoading || isPresenting ? "opacity-50 cursor-not-allowed" : ""}`}
         aria-label={isSharing ? "Stop screen sharing" : "Start screen sharing"}
         aria-pressed={isSharing}
       >
@@ -41,4 +42,4 @@ const ScreenSharing = ({
   );
 };
 
-export default ScreenSharing;
+export default React.memo(ScreenSharing);

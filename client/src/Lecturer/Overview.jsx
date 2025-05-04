@@ -1,321 +1,473 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { FaBook, FaVideo, FaUpload, FaTasks, FaComments } from "react-icons/fa";
-import { useNavigate } from "react-router-dom";
-import UploadMaterials from "./materialUpload"; // Make sure to import this component
+import {
+  FaBook,
+  FaVideo,
+  FaUpload,
+  FaTasks,
+  FaComments,
+  FaBullhorn,
+  FaCalendarAlt,
+} from "react-icons/fa";
+import UploadMaterials from "./materialUpload";
+
+// Enhanced date formatting functions
+const formatDate = (dateString) => {
+  const date = parseDate(dateString);
+  return date?.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }) || "Not scheduled";
+};
+
+const formatTime = (dateString) => {
+  const date = parseDate(dateString);
+  return date?.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  }) || "--:--";
+};
+
+const parseDate = (dateString) => {
+  if (!dateString) return null;
+
+  // Try parsing as ISO string first
+  let date = new Date(dateString);
+  if (!isNaN(date.getTime())) return date;
+
+  // If that fails, try parsing as timestamp
+  date = new Date(parseInt(dateString));
+  if (!isNaN(date.getTime())) return date;
+
+  return null;
+};
 
 export default function Overview({ user }) {
-  const navigate = useNavigate();
   const [courses, setCourses] = useState([]);
   const [schedules, setSchedules] = useState([]);
-
   const [announcements, setAnnouncements] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [materials, setMaterials] = useState([]);
-  const [showUploadModal, setShowUploadModal] = useState(false); // Added missing state
-
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [pendingAssignmentsCount, setPendingAssignmentsCount] = useState(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchAllData = async () => {
       try {
-        console.groupCollapsed('[FRONTEND] User Data Verification');
-        console.log('Full user object:', JSON.stringify(user, null, 2));
-        console.log(user)
-        
-        if (!user) {
-          throw new Error('User session not loaded. Please wait...');
+        if (!user?._id || user?.role !== "lecturer") {
+          setLoading(false);
+          return;
         }
-  
-        if (!user._id) {
-          throw new Error('Your session is incomplete. Please log in again.');
-        }
-  
-        if (user.role !== 'lecturer') {
-          throw new Error('This feature is only available for lecturers');
-        }
-        console.groupEnd();
   
         const lecturerId = String(user._id).trim();
   
-        // ✅ Fetch courses
-        const response = await fetch("/api/lecturer/my-courses", {
+        // Fetch courses
+        const coursesResponse = await fetch("/api/lecturer/my-courses", {
           headers: {
-            'lecturer-id': lecturerId,
-            'Content-Type': 'application/json',
-            'X-User-Role': user.role
+            "lecturer-id": lecturerId,
+            "Content-Type": "application/json",
+            "X-User-Role": user.role,
           },
-          credentials: 'include'
+          credentials: "include",
         });
   
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Course fetch failed');
-        }
-  
-        const coursesData = await response.json();
+        if (!coursesResponse.ok) throw new Error("Failed to fetch courses");
+        const coursesData = await coursesResponse.json();
         setCourses(coursesData);
   
-        // ✅ Fetch schedules
-        const scheduleRes = await fetch(`/api/schedule/schedules/${lecturerId}`);
-        if (!scheduleRes.ok) {
-          const scheduleError = await scheduleRes.json();
-          throw new Error(scheduleError.message || "Failed to fetch schedules");
+        // Fetch schedules
+        const schedulesResponse = await fetch(
+          `/api/schedule/schedules/${lecturerId}`
+        );
+        if (!schedulesResponse.ok) throw new Error("Failed to fetch schedules");
+        const schedulesData = await schedulesResponse.json();
+        setSchedules(schedulesData.schedules || []);
+  
+        // Fetch announcements
+        const announcementsResponse = await fetch("/api/hod/announcements");
+        if (!announcementsResponse.ok)
+          throw new Error("Failed to fetch announcements");
+        const announcementsData = await announcementsResponse.json();
+        setAnnouncements(announcementsData.announcements || []);
+  
+        // Fetch assignments
+        const assignmentsResponse = await fetch(
+          `/api/assignments/lecturer/${lecturerId}`,
+          {
+            method: 'GET',
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Role": user.role,
+              "Lecturer-Id": lecturerId,
+            },
+            credentials: "include",
+          }
+        );
+  
+        if (!assignmentsResponse.ok) {
+          throw new Error("Failed to fetch assignments");
         }
-        const scheduleData = await scheduleRes.json();
-        setSchedules(scheduleData.schedules || []);
-        console.log("[FRONTEND] Successfully fetched schedules:", scheduleData.schedules);
-  
-      } catch (error) {
-        console.error('[FRONTEND] Operation Failed:', error.message);
-        setError(error.message);
-        setCourses([]);
-        setAnnouncements([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-  
-    if (user?.role === 'lecturer') {
-      fetchData();
-    } else {
-      setLoading(false);
-    }
-  }, [user]);
-  
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        console.groupCollapsed('[FRONTEND] User Data Verification');
-        console.log('Full user object:', JSON.stringify(user, null, 2));
         
-        if (!user) {
-          console.error('User object is null/undefined');
-          throw new Error('User session not loaded. Please wait...');
-        }
-
-        // Use _id instead of id
-        if (!user._id) {
-          console.error('User ID missing in:', user);
-          throw new Error('Your session is incomplete. Please log in again.');
-        }
-
-        if (user.role !== 'lecturer') {
-          console.warn(`User with role '${user.role}' trying to access lecturer endpoint`);
-          throw new Error('This feature is only available for lecturers');
-        }
-        console.groupEnd();
-
-        const lecturerId = String(user._id).trim();  // Fix here for _id
-        console.log('[FRONTEND] Sending request with lecturer ID:', lecturerId);
-
-        const response = await fetch("/api/lecturer/my-courses", {
-          headers: {
-            'lecturer-id': lecturerId,  // Ensure correct header
-            'Content-Type': 'application/json',
-            'X-User-Role': user.role
-          },
-          credentials: 'include'
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.error('[FRONTEND] API Error:', {
-            status: response.status,
-            error: errorData
-          });
-          throw new Error(errorData.message || 'Course fetch failed');
-        }
-
-        const coursesData = await response.json();
-        setCourses(coursesData);
-        console.log('[FRONTEND] Successfully fetched courses:', {
-          lecturerId: user._id,
-          courseCount: coursesData.length
-        });
-
-      } catch (error) {
-        console.error('[FRONTEND] Operation Failed:', {
-          error: error.message,
-          user: user ? {id: user._id, role: user.role} : 'null'
-        });
-        setError(error.message);
-        setCourses([]);
-        setAnnouncements([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (user?.role === 'lecturer') {
-      console.log('[FRONTEND] Initiating lecturer data fetch for:', user._id);  // Use _id here
-      fetchData();
-    } else {
-      console.log('[FRONTEND] Access Denied - User:', 
-        user ? `Role: ${user.role}` : 'Not logged in');
-      setLoading(false);
-    }
-  }, [user]);
-
-  const handleStartLiveLecture = () => {
-    navigate("/live");
-  };
-
-  const handleUploadClick = () => {
-    setShowUploadModal(true);
-  };
-
-
-  useEffect(() => {
-    const fetchMaterials = async () => {
-      try {
-    
-        const lecturerId = String(user._id).trim();
-        
-     
-        const queryParams = new URLSearchParams();
-     
+        const assignmentsData = await assignmentsResponse.json();
+        const assignmentsArray = assignmentsData.assignments || assignmentsData.data || [];
+        setAssignments(assignmentsArray);
   
-        const res = await fetch(`/api/lecturer/materials?${queryParams}`, {
-          method: "GET", // Changed to GET to match backend
+        // Calculate pending assignments
+        const pendingCount = assignmentsArray.filter(
+          (assignment) => !assignment.graded
+        ).length;
+        setPendingAssignmentsCount(pendingCount);
+  
+        // Fetch materials
+        const materialsResponse = await fetch(`/api/lecturer/materials`, {
           headers: {
             "Content-Type": "application/json",
-            "Lecturer-Id": lecturerId, 
-            "X-User-Role": "lecturer"
-          }
+            "Lecturer-Id": lecturerId,
+            "X-User-Role": "lecturer",
+          },
         });
   
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!materialsResponse.ok) throw new Error("Failed to fetch materials");
+        const materialsData = await materialsResponse.json();
+        if (materialsData.success) setMaterials(materialsData.materials);
   
-        const data = await res.json();
-        if (data.success) {
-          setMaterials(data.materials);
-        } else {
-          console.error("Failed to load materials:", data.message);
-          console.log("materials",data)
-          console.log(materials)
-        }
-      } catch (err) {
-        console.error("Error fetching materials:", err);
-        // Consider setting error state for UI feedback
+        // Fetch unread messages (placeholder)
+        setUnreadMessagesCount(5);
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        setError(error.message);
       } finally {
         setLoading(false);
       }
     };
   
-    fetchMaterials();
-  }, []); // Add dependencies if needed
-  
-  const totalMaterials = materials.length;
+    fetchAllData();
+  }, [user]);
 
-  if (loading) return <div>Loading...</div>;
+  // Current date and time
+  const now = new Date();
+
+  // Helper function to compare dates without time
+  const isSameDay = (date1, date2) => {
+    return (
+      date1.getDate() === date2.getDate() &&
+      date1.getMonth() === date2.getMonth() &&
+      date1.getFullYear() === date2.getFullYear()
+    );
+  };
+
+  // Filter today's lectures (where endTime is today)
+  const todaysLectures = schedules.filter((schedule) => {
+    const startTime = parseDate(schedule.startTime);
+    const endTime = parseDate(schedule.endTime);
+
+    if (!startTime || !endTime) return false;
+
+    // Check if it's today
+    const isToday = isSameDay(endTime, now);
+
+    const isCurrentOrFuture = now < endTime;
+
+    return isToday && isCurrentOrFuture;
+  });
+
+  // Filter upcoming lectures (where endTime is after today)
+  const upcomingLectures = schedules
+    .filter((schedule) => {
+      const endTime = parseDate(schedule.endTime);
+      if (!endTime) return false;
+
+      // Create date-only versions for comparison
+      const endDate = new Date(endTime);
+      endDate.setHours(0, 0, 0, 0);
+
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+
+      return endDate > today && !isSameDay(endTime, now);
+    })
+    .sort((a, b) => {
+      const endTimeA = parseDate(a.endTime);
+      const endTimeB = parseDate(b.endTime);
+      return (endTimeA || 0) - (endTimeB || 0);
+    });
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="animate-pulse text-center py-8 text-gray-600">
+        Loading your dashboard...
+      </div>
+    </div>
+  );
+  
+  if (error) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="text-red-500 text-center py-8 max-w-md mx-auto bg-red-50 p-6 rounded-lg">
+        <p className="font-medium">Error loading dashboard</p>
+        <p className="mt-2 text-sm">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="mt-4 px-4 py-2 bg-red-100 text-red-600 rounded-md hover:bg-red-200 transition"
+        >
+          Try Again
+        </button>
+      </div>
+    </div>
+  );
 
   return (
-    <motion.div
-      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 p-4"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
-    >
-      {/* Top Row: Quick Stats */}
-      <StatCard 
-        icon={<FaBook />} 
-        title="My Courses" 
-        value={`${courses.length} Assigned`} 
-      />
-      <StatCard icon={<FaVideo />} title="Live Lectures Today" value="2 Scheduled" />
-      <StatCard icon={<FaUpload />} title="Uploaded Resources" value={`${totalMaterials} Materials`} />
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
+      {/* Header */}
+      <header className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 rounded-xl shadow-lg mb-6 text-white">
+        <h1 className="text-2xl md:text-3xl font-bold">Lecturer Dashboard</h1>
+        <p className="text-blue-100 mt-2">
+          Welcome, <span className="font-semibold">{user.title}{user.name}</span>
+        </p>
+      </header>
 
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* Courses Card */}
+        <StatCard
+          icon={<FaBook className="text-blue-600 text-2xl" />}
+          title="My Courses"
+          value={`${courses.length} Assigned`}
+          color="blue"
+        />
 
-      {/* Second Row: Assignments, Messages & Lectures */}
-      <StatCard icon={<FaTasks />} title="Pending Assignments" value="3 to Grade" />
-      <StatCard icon={<FaComments />} title="Student Messages" value="5 Unread" />
-      <motion.div className="p-6 bg-white rounded-lg shadow-lg col-span-1 sm:col-span-2 lg:col-span-1">
-        <h2 className="text-lg font-bold text-gray-800 mb-3">Upcoming Lectures</h2>
-        <ul className="text-gray-600">
-          {courses.slice(0, 2).map(course => (
-            <li key={course._id}>
-              📖 {course.courseName} – {course.schedule}
-              <a href="#" className="text-blue-600 ml-2">[Join]</a>
-            </li>
-          ))}
-        </ul>
-      </motion.div>
+        {/* Today's Lectures Card */}
+        <StatCard
+          icon={<FaVideo className="text-green-600 text-2xl" />}
+          title="Today's Lectures"
+          value={`${todaysLectures.length} Scheduled`}
+          color="green"
+        />
 
-      {/* Announcements Section */}
-      <motion.div className="p-6 bg-white rounded-lg shadow-lg col-span-1 sm:col-span-2 lg:col-span-2">
-        <h2 className="text-lg font-bold text-gray-800 mb-3">Announcements from HOD</h2>
-        {announcements.length > 0 ? (
-          announcements.slice(0, 3).map(announcement => (
-            <div key={announcement._id} className="mb-3">
-              <p className="text-gray-600">
-                <strong>{new Date(announcement.createdAt).toLocaleDateString()}:</strong> 
-                {announcement.message}
-              </p>
-            </div>
-          ))
-        ) : (
-          <p className="text-gray-600">No announcements</p>
-        )}
-      </motion.div>
+        {/* Materials Card */}
+        <StatCard
+          icon={<FaUpload className="text-purple-600 text-2xl" />}
+          title="Uploaded Resources"
+          value={`${materials.length} Materials`}
+          color="purple"
+        />
 
-      {/* Quick Actions */}
-      <motion.div className="p-6 bg-white rounded-lg shadow-lg">
-        <h2 className="text-lg font-bold text-gray-800 mb-3">Quick Actions</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <ActionButton 
-            title="Start Lecture" 
-            icon={<FaVideo />} 
-            onClick={handleStartLiveLecture} 
-          />
-          <ActionButton 
-            title="Upload Materials" 
-            icon={<FaUpload />} 
-            onClick={handleUploadClick}
-          />
+        {/* Assignments Card */}
+        <StatCard
+          icon={<FaTasks className="text-orange-600 text-2xl" />}
+          title="Assignments"
+          value={`${assignments.length} Given`}
+          color="orange"
+        />
+      </div>
+
+      {/* Detailed Sections */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Today's Lectures Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="bg-gradient-to-r from-green-600 to-teal-600 p-4 text-white">
+            <h2 className="text-lg font-semibold flex items-center">
+              <FaVideo className="w-4 h-4 mr-2" />
+              Today's Lectures
+            </h2>
+          </div>
+          <div className="p-4">
+            {todaysLectures.length === 0 ? (
+              <div className="text-center py-6 text-gray-500">
+                No lectures scheduled for today
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {todaysLectures.map((lecture) => (
+                  <li key={lecture._id} className="border-l-4 border-green-500 pl-3 py-2 hover:bg-gray-50 transition">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-medium text-gray-800">
+                          {lecture.title || "No course name"}
+                        </h4>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                          <div className="flex items-center text-gray-500">
+                            <span className="font-medium mr-1">Time:</span>
+                            <span>{formatTime(lecture.startTime)}</span>
+                            <span className="mx-1">to</span>
+                            <span>{formatTime(lecture.endTime)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full whitespace-nowrap">
+                        Today
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-      </motion.div>
+
+        {/* Upcoming Lectures Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white">
+            <h2 className="text-lg font-semibold flex items-center">
+              <FaCalendarAlt className="w-4 h-4 mr-2" />
+              Upcoming Lectures
+            </h2>
+            <span className="text-sm text-blue-100 ml-auto">
+              {upcomingLectures.length} upcoming
+            </span>
+          </div>
+          <div className="p-4">
+            {upcomingLectures.length === 0 ? (
+              <div className="text-center py-6 text-gray-500">
+                No upcoming lectures scheduled
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {upcomingLectures.slice(0, 4).map((lecture) => (
+                  <li key={lecture._id} className="border-l-4 border-blue-500 pl-3 py-2 hover:bg-gray-50 transition">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-medium text-gray-800">
+                          {lecture.title || "No course name"}
+                        </h4>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                          <div className="flex items-center text-gray-500">
+                            <span className="font-medium mr-1">Date:</span>
+                            <span>{formatDate(lecture.startTime)}</span>
+                          </div>
+                          <div className="flex items-center text-gray-500">
+                            <span className="font-medium mr-1">Time:</span>
+                            <span>{formatTime(lecture.startTime)}</span>
+                            <span className="mx-1">to</span>
+                            <span>{formatTime(lecture.endTime)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Assignments Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="bg-gradient-to-r from-orange-600 to-amber-600 p-4 text-white">
+            <h2 className="text-lg font-semibold flex items-center">
+              <FaTasks className="w-4 h-4 mr-2" />
+              Recent Assignments
+            </h2>
+          </div>
+          <div className="p-4">
+            {assignments.length === 0 ? (
+              <div className="text-center py-6 text-gray-500">
+                No assignments given yet
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {assignments.slice(0, 4).map((assignment) => (
+                  <li key={assignment._id} className="border-l-4 border-orange-500 pl-3 py-2 hover:bg-gray-50 transition">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-medium text-gray-800">
+                          {assignment.title}
+                        </h4>
+                        <div className="mt-1 flex items-center text-xs text-gray-500">
+                          <span>Due: {formatDate(assignment.dueDate)}</span>
+                        </div>
+                      </div>
+                      {/* <span className={`text-xs px-2 py-1 rounded-full ${
+                        assignment.graded 
+                          ? "bg-green-100 text-green-800" 
+                          : "bg-orange-100 text-orange-800"
+                      }`}>
+                        {assignment.graded ? "Graded" : "Pending"}
+                      </span> */}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* Announcements Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden lg:col-span-3">
+          <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-4 text-white">
+            <h2 className="text-lg font-semibold flex items-center">
+              <FaBullhorn className="w-4 h-4 mr-2" />
+              Latest Announcements
+            </h2>
+          </div>
+          <div className="p-4">
+            {announcements.length === 0 ? (
+              <div className="text-center py-6 text-gray-500">
+                No announcements available
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {announcements.slice(0, 4).map((announcement) => (
+                  <div key={announcement._id} className="p-4 bg-gray-50 rounded-lg border-l-4 border-purple-500 hover:bg-white transition">
+                    <div className="flex justify-between items-start">
+                      <h4 className="font-medium text-gray-800">
+                        {announcement.title || "Announcement"}
+                      </h4>
+                      <span className="text-xs text-gray-500 whitespace-nowrap">
+                        {formatDate(announcement.createdAt)}
+                      </span>
+                    </div>
+                    <p className="text-gray-600 mt-2 text-sm">
+                      {announcement.message}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <UploadMaterials 
-              courses={courses} 
+            <UploadMaterials
+              courses={courses}
               onClose={() => setShowUploadModal(false)}
             />
           </div>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }
 
-/* Stats Card Component */
-function StatCard({ icon, title, value }) {
+function StatCard({ icon, title, value, color = "blue" }) {
+  const colorClasses = {
+    blue: { bg: "bg-blue-100", text: "text-blue-600" },
+    green: { bg: "bg-green-100", text: "text-green-600" },
+    purple: { bg: "bg-purple-100", text: "text-purple-600" },
+    orange: { bg: "bg-orange-100", text: "text-orange-600" },
+  };
+
   return (
-    <motion.div className="p-6 bg-white rounded-lg shadow-lg flex items-center space-x-4">
-      <div className="text-blue-600 text-3xl">{icon}</div>
-      <div>
-        <h3 className="text-lg font-bold">{title}</h3>
-        <p className="text-gray-600">{value}</p>
+    <motion.div 
+      className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+      whileHover={{ y: -2 }}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">{title}</h3>
+          <p className="text-xl font-bold mt-1">{value}</p>
+        </div>
+        <div className={`${colorClasses[color].bg} p-3 rounded-full`}>
+          {icon}
+        </div>
       </div>
     </motion.div>
-  );
-}
-
-/* Quick Actions Button */
-function ActionButton({ title, icon, onClick }) {
-  return (
-    <motion.button
-      className="p-3 bg-blue-600 text-white rounded-lg flex items-center justify-center space-x-2 hover:bg-blue-700 w-full"
-      onClick={onClick}
-    >
-      {icon}
-      <span>{title}</span>
-    </motion.button>
   );
 }

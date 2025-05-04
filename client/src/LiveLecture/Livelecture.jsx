@@ -2,25 +2,30 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Peer from "peerjs";
 import { v4 as uuidV4 } from "uuid";
+import { useSelector } from "react-redux";
+
 import ControlBar from "./Contolbar";
 import Chat from "./Chat";
 import ParticipantsList from "./Participants";
-import AttendancePanel from "./AttendancePannel";
 import PresentationRequestModal from "./PresentaionRequestModel";
-import socket from './socket';
-import { useSelector } from "react-redux";
 
+// Utils
+import socket from "./socket";
+import VideoGrid from "./VideoGrid";
 
-
-export default function LiveLecture() {
+const LiveLecture = () => {
   const { lectureId } = useParams();
+  const user = useSelector((state) => state.user.user);
+  const [presenterId, setPresenterId] = useState(null);
+  const [, setIsScreenAvailable] = useState(false);
+  // Components
+  // State
   const [stream, setStream] = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   const [peers, setPeers] = useState({});
   const [micOn, setMicOn] = useState(true);
   const [videoOn, setVideoOn] = useState(true);
-  const [raisedHand, setRaisedHand] = useState(false);
-  const [messages, setMessages] = useState([]);
+  const [raisedHands, setRaisedHands] = useState({});
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [participants, setParticipants] = useState([]);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
@@ -28,55 +33,126 @@ export default function LiveLecture() {
   const [isLecturer, setIsLecturer] = useState(false);
   const [isPresenting, setIsPresenting] = useState(false);
   const [showRequestModal, setShowRequestModal] = useState(false);
-  
-  const videoGridRef = useRef(null);
+  const [messages, setMessages] = useState([]);
+  // Refs
   const peerRef = useRef(null);
   const myVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
   const myAudioRef = useRef(null);
-  const user = useSelector((state) => state.user.user);
+  const videoGridRef = useRef(null);
 
+
+
+
+  // Socket handler
+useEffect(() => {
+  socket.on('receive-chat-message', (message) => {
+    setMessages(prev => [...prev, message]);
+  });
+  
+  return () => socket.off('receive-chat-message');
+}, []);
+
+const sendMessage = (text) => {
+  socket.emit('send-chat-message', { 
+    lectureId, 
+    message: text 
+  });
+};
+
+
+  // Initialize lecture
   useEffect(() => {
-    // Initialize user role
-    const userRole = localStorage.getItem("userRole");
-    setIsLecturer(userRole === "lecturer");
-    console.log(`${user.role} ${user.name} (${user.email}) joined lecture ${lectureId}`);
-    // Initialize PeerJS
-    const myPeer = new Peer(uuidV4());
-    peerRef.current = myPeer;
+    const initializeLecture = async () => {
+      setIsLecturer(user.role === "lecturer");
 
-    // Get user media
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then((userStream) => {
-        setStream(userStream);
-        if (myVideoRef.current) myVideoRef.current.srcObject = userStream;
-        if (myAudioRef.current) myAudioRef.current.srcObject = userStream;
+      // Initialize PeerJS
+      const myPeer = new Peer(uuidV4());
+      peerRef.current = myPeer;
 
-        // Handle incoming calls
-        myPeer.on("call", (call) => {
-          call.answer(userStream);
-          const video = document.createElement("video");
-          const audio = document.createElement("audio");
-
-          call.on("stream", (userStream) => {
-            video.srcObject = userStream;
-            video.play();
-            videoGridRef.current.append(video);
-
-            audio.srcObject = userStream;
-            audio.autoplay = true;
-            document.body.appendChild(audio);
-          });
-
-          call.on("close", () => {
-            video.remove();
-            audio.remove();
-          });
+      try {
+        const userStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
         });
-      })
-      .catch(console.error);
+        setStream(userStream);
 
-    // Socket event handlers
+        // Setup peer connections
+        setupPeerConnections(myPeer, userStream);
+
+        // Connect to socket
+        connectToSocket();
+
+        // Set up video element
+        if (myVideoRef.current) {
+          myVideoRef.current.srcObject = userStream;
+        }
+        if (myAudioRef.current) {
+          myAudioRef.current.srcObject = userStream;
+        }
+      } catch (error) {
+        console.error("Error accessing media devices:", error);
+      }
+    };
+
+    initializeLecture();
+
+    return cleanup;
+  }, [lectureId, user.role]);
+
+  const setupPeerConnections = (myPeer, userStream) => {
+    // Handle incoming calls
+    myPeer.on("call", (call) => {
+      call.answer(userStream);
+      const video = document.createElement("video");
+      const audio = document.createElement("audio");
+
+      call.on("stream", (userVideoStream) => {
+        video.srcObject = userVideoStream;
+        video.play();
+        videoGridRef.current.append(video);
+
+        audio.srcObject = userVideoStream;
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+      });
+
+      call.on("close", () => {
+        video.remove();
+        audio.remove();
+      });
+    });
+  };
+
+  const connectToNewUser = (userId, stream) => {
+    if (!stream) return;
+    const call = peerRef.current.call(userId, stream);
+
+    const video = document.createElement("video");
+    call.on("stream", (userVideoStream) => {
+      video.srcObject = userVideoStream;
+      video.autoplay = true;
+      video.className = "rounded-lg shadow-lg";
+      videoGridRef.current.append(video);
+    });
+
+    call.on("close", () => {
+      video.remove();
+    });
+
+    setPeers((prev) => ({ ...prev, [userId]: call }));
+
+    // If this is the presenter connecting, send them our screen stream
+    if (isSharingScreen && screenStream) {
+      const senders = call.peerConnection.getSenders();
+      const videoSender = senders.find((s) => s.track?.kind === "video");
+      if (videoSender) {
+        videoSender.replaceTrack(screenStream.getVideoTracks()[0]);
+      }
+    }
+  };
+
+  const connectToSocket = () => {
     socket.on("user-connected", (userId) => {
       connectToNewUser(userId, stream);
       console.log(`Participant joined: ${user.name} (${user.email})`);
@@ -91,58 +167,43 @@ export default function LiveLecture() {
       setParticipants(participants);
     });
 
-    socket.on("presentation-approved", () => {
+    socket.on("presentation-started", ({ userId }) => {
       setIsPresenting(true);
+      setPresenterId(userId);
+      if (userId === peerRef.current.id) {
+        setIsScreenAvailable(true);
+      }
     });
 
     socket.on("presentation-stopped", () => {
       setIsPresenting(false);
+      setPresenterId(null);
       if (isSharingScreen) stopScreenShare();
     });
 
-    // Join or create lecture
-    if (isLecturer && !lectureId) {
-      const courseId = "course-id-from-url-or-state"; // You'll need to get this
-      socket.emit("create-lecture", { courseId });
-    } else if (lectureId) {
-      socket.emit("join-lecture", { lectureId });
+    socket.on("chat-message", (message) => {
+      setMessages((prev) => [...prev, message]);
+    });
+
+    // Join lecture
+    if (lectureId) {
+      socket.emit("join-lecture", { lectureId, user });
     }
+  };
 
-    return () => {
-      // Cleanup
-      socket.off("user-connected");
-      socket.off("user-disconnected");
-      socket.off("attendance-update");
-      socket.off("presentation-approved");
-      socket.off("presentation-stopped");
-
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      if (screenStream) screenStream.getTracks().forEach(track => track.stop());
-    };
-  }, [lectureId, isLecturer]);
-
-  const connectToNewUser = (userId, stream) => {
-    if (!stream) return;
-    const call = peerRef.current.call(userId, stream);
-    const video = document.createElement("video");
-    const audio = document.createElement("audio");
-
-    call.on("stream", (userStream) => {
-      video.srcObject = userStream;
-      video.play();
-      videoGridRef.current.append(video);
-
-      audio.srcObject = userStream;
-      audio.autoplay = true;
-      document.body.appendChild(audio);
+  const cleanup = () => {
+    // Clean up media streams
+    [stream, screenStream].forEach((s) => {
+      if (s) s.getTracks().forEach((track) => track.stop());
     });
 
-    call.on("close", () => {
-      video.remove();
-      audio.remove();
-    });
-
-    setPeers(prev => ({ ...prev, [userId]: call }));
+    // Clean up socket listeners
+    socket.off("user-connected");
+    socket.off("user-disconnected");
+    socket.off("attendance-update");
+    socket.off("presentation-approved");
+    socket.off("presentation-stopped");
+    socket.off("chat-message");
   };
 
   const toggleMic = () => {
@@ -151,12 +212,12 @@ export default function LiveLecture() {
       if (audioTracks.length > 0) {
         audioTracks[0].enabled = !micOn;
         setMicOn(!micOn);
-        
-        Object.values(peers).forEach(peer => {
+
+        Object.values(peers).forEach((peer) => {
           const senders = peer.peerConnection.getSenders();
-          const audioSender = senders.find(s => s.track?.kind === "audio");
+          const audioSender = senders.find((s) => s.track?.kind === "audio");
           if (audioSender) {
-            audioTracks[0].enabled 
+            audioTracks[0].enabled
               ? audioSender.replaceTrack(audioTracks[0])
               : audioSender.replaceTrack(null);
           }
@@ -174,45 +235,44 @@ export default function LiveLecture() {
       }
     }
   };
+  socket.on("hand-raised", ({ userId, isRaised }) => {
+    setRaisedHands((prev) => ({ ...prev, [userId]: isRaised }));
+  });
 
+  // Raise hand function
   const handleRaiseHand = () => {
-    setRaisedHand(!raisedHand);
-    socket.emit("raise-hand", { raisedHand: !raisedHand });
-  };
-
-  const requestPresentation = () => {
-    setShowRequestModal(true);
-  };
-
-  const confirmPresentationRequest = () => {
-    socket.emit("request-presentation", { lectureId });
-    setShowRequestModal(false);
+    const newState = !raisedHands[user.id];
+    socket.emit("raise-hand", {
+      lectureId,
+      userId: user.id,
+      isRaised: newState,
+    });
   };
 
   const startScreenShare = async () => {
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-        video: true, 
-        audio: true 
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
       });
 
       setScreenStream(screenStream);
       setIsSharingScreen(true);
-
-      if (myVideoRef.current) {
-        myVideoRef.current.srcObject = screenStream;
-      }
+      socket.emit("start-presentation", { lectureId });
 
       // Replace video track for all peers
-      Object.values(peers).forEach(peer => {
+      Object.values(peers).forEach((peer) => {
         const senders = peer.peerConnection.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === "video");
+        const videoSender = senders.find((s) => s.track?.kind === "video");
         if (videoSender) {
           videoSender.replaceTrack(screenStream.getVideoTracks()[0]);
         }
       });
 
-      screenStream.getVideoTracks()[0].onended = stopScreenShare;
+      screenStream.getVideoTracks()[0].onended = () => {
+        stopScreenShare();
+        socket.emit("stop-presentation", { lectureId });
+      };
     } catch (error) {
       console.error("Screen share error:", error);
     }
@@ -220,17 +280,15 @@ export default function LiveLecture() {
 
   const stopScreenShare = () => {
     if (screenStream) {
-      screenStream.getTracks().forEach(track => track.stop());
+      screenStream.getTracks().forEach((track) => track.stop());
       setScreenStream(null);
       setIsSharingScreen(false);
 
-      // Restore camera stream
-      if (stream && myVideoRef.current) {
-        myVideoRef.current.srcObject = stream;
-        
-        Object.values(peers).forEach(peer => {
+      // Restore camera stream for all peers
+      if (stream) {
+        Object.values(peers).forEach((peer) => {
           const senders = peer.peerConnection.getSenders();
-          const videoSender = senders.find(s => s.track?.kind === "video");
+          const videoSender = senders.find((s) => s.track?.kind === "video");
           if (videoSender && stream.getVideoTracks()[0]) {
             videoSender.replaceTrack(stream.getVideoTracks()[0]);
           }
@@ -239,98 +297,120 @@ export default function LiveLecture() {
     }
   };
 
-  const sendMessage = (message) => {
-    socket.emit("chat-message", { 
-      lectureId, 
-      message,
-      sender: localStorage.getItem("userName")
-    });
-    setMessages(prev => [...prev, { user: "Me", text: message }]);
+ 
+
+  const confirmPresentationRequest = () => {
+    socket.emit("request-presentation", { lectureId });
+    setShowRequestModal(false);
   };
 
-  const openChat = () => {
-    setIsChatOpen(!isChatOpen);
+  const approvePresentation = (studentId) => {
+    socket.emit("approve-presentation", { lectureId, studentId });
   };
+
+  const LectureHeader = ({ isLecturer, onRequestPresentation }) => (
+    <div className="bg-gray-800 p-2 flex justify-between items-center">
+      <h1 className="text-xl font-bold">
+        {isLecturer ? "Hosting Live Lecture" : "Attending Live Lecture"}
+      </h1>
+      <div className="flex items-center space-x-4">
+        {!isLecturer && !isPresenting && (
+          <button
+            onClick={onRequestPresentation}
+            className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700"
+          >
+            Request to Present
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const SidePanels = ({
+    isChatOpen,
+    messages,
+    sendMessage,
+    participants,
+    isLecturer,
+    onApprovePresentation,
+    
+  }) => (
+    <div className="absolute right-4 bottom-20 flex flex-col space-y-4">
+      {isChatOpen && (
+       <Chat 
+       messages={messages}
+       sendMessage={sendMessage}
+       onClose={() => setIsChatOpen(false)}
+     />
+      )}
+      <div className="mt-2">
+        <ParticipantsList
+          participants={participants}
+          isLecturer={isLecturer}
+          raisedHands={raisedHands}
+          onApprovePresentation={onApprovePresentation}
+        />
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white">
-      {/* Header with attendance info */}
-      <div className="bg-gray-800 p-2 flex justify-between items-center">
-        <h1 className="text-xl font-bold">
-          {isLecturer ? "Hosting Live Lecture" : "Attending Live Lecture"}
-        </h1>
-        <div className="flex items-center space-x-4">
-          <AttendancePanel count={attendanceCount} />
-          {!isLecturer && !isPresenting && (
-            <button 
-              onClick={requestPresentation}
-              className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700"
-            >
-              Request to Present
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Header */}
+      <LectureHeader
+        isLecturer={isLecturer}
+        attendanceCount={attendanceCount}
+        onRequestPresentation={() => setShowRequestModal(true)}
+      />
 
       {/* Video Grid */}
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 p-4" ref={videoGridRef}>
-        <video 
-          ref={myVideoRef} 
-          autoPlay 
-          muted 
-          className={`rounded-lg shadow-lg ${isPresenting ? "border-4 border-yellow-400" : ""}`}
-        ></video>
-        
-        {isSharingScreen && (
-          <video 
-            ref={screenVideoRef} 
-            autoPlay 
-            className="rounded-lg shadow-lg border-4 border-green-400"
-          ></video>
-        )}
-      </div>
+      <VideoGrid
+        myVideoRef={myVideoRef}
+        screenVideoRef={screenVideoRef}
+        isPresenting={isPresenting}
+        isSharingScreen={isSharingScreen}
+        peers={peers}
+        presenterId={presenterId}
+        isLecturer={isLecturer}
+      />
 
       {/* Audio Element (hidden) */}
-      <audio ref={myAudioRef} autoPlay controls className="hidden"></audio>
+      <audio ref={myAudioRef} autoPlay controls className="hidden" />
 
       {/* Control Bar */}
       <ControlBar
         micOn={micOn}
         videoOn={videoOn}
-        raisedHand={raisedHand}
+      
         isSharingScreen={isSharingScreen}
         isPresenting={isPresenting}
+        presenterId={presenterId}
         isLecturer={isLecturer}
         toggleMic={toggleMic}
         toggleVideo={toggleVideo}
         handleRaiseHand={handleRaiseHand}
-        openChat={openChat}
+        currentUserId={peerRef.current?.id}
+        openChat={() => setIsChatOpen(!isChatOpen)}
         onStartScreenShare={startScreenShare}
         onStopScreenShare={stopScreenShare}
-        onStopPresentation={() => socket.emit("stop-presentation", { lectureId })}
+        onStopPresentation={() =>
+          socket.emit("stop-presentation", { lectureId })
+        }
+        myVideoRef={myVideoRef}
       />
 
       {/* Side Panels */}
-      <div className="absolute right-4 bottom-20 flex flex-col space-y-4">
-        {isChatOpen && (
-          <Chat 
-            messages={messages} 
-            sendMessage={sendMessage} 
-            onClose={() => setIsChatOpen(false)}
-          />
-        )}
-        <div className="mt-3 pt-4">
-        <ParticipantsList 
-          participants={participants} 
-          isLecturer={isLecturer}
-          onApprovePresentation={(studentId) => 
-            socket.emit("approve-presentation", { lectureId, studentId })
-          }
-        />
-        </div>
-      </div>
+      <SidePanels
+        isChatOpen={isChatOpen}
+        messages={messages}
+        sendMessage={sendMessage}
+        participants={participants}
+        isLecturer={isLecturer}
+        onApprovePresentation={approvePresentation}
+        onCloseChat={() => setIsChatOpen(false)}
+      />
 
-      {/* Presentation Request Modal */}
+      {/* Modals */}
       {showRequestModal && (
         <PresentationRequestModal
           onConfirm={confirmPresentationRequest}
@@ -339,4 +419,6 @@ export default function LiveLecture() {
       )}
     </div>
   );
-}
+};
+
+export default LiveLecture;

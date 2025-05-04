@@ -59,9 +59,9 @@ const upload = multer({
 // Verify transporter connection (added)
 transporter.verify((error) => {
   if (error) {
-    console.error('SMTP Connection Error:', error);
+   
   } else {
-    console.log('SMTP Server is ready to send messages');
+    
   }
 });
 
@@ -294,7 +294,7 @@ if (notifyStudents === 'true' && studentsToNotify.length > 0) {
       await Promise.all(emailPromises);
 
   } catch (notificationError) {
-      console.error("Notification system error:", notificationError);
+      
   }
 }
 
@@ -350,8 +350,7 @@ if (notifyStudents === 'true' && studentsToNotify.length > 0) {
                 await Promise.all(emailPromises); // Use Promise.all instead of allSettled to match schedule route
 
             } catch (notificationError) {
-                console.error("Notification system error:", notificationError);
-                // Continue with response even if notifications fail
+           
             }
         }
 
@@ -390,6 +389,30 @@ if (notifyStudents === 'true' && studentsToNotify.length > 0) {
     }
 });
 
+
+// Get assignments by lecturer ID (using createdBy field)
+AssignmentRouter.get('/lecturer/:lecturerId', async (req, res) => {
+  try {
+    const assignments = await Assignment.find({ createdBy: req.params.lecturerId })
+      .sort('-createdAt')
+      .populate('course', 'courseName courseCode')
+      .populate('createdBy', 'name email'); // Populate lecturer info
+
+    console.log(`Found ${assignments.length} assignments for lecturer ${req.params.lecturerId}`);
+    
+    res.status(200).json({
+      success: true,
+      count: assignments.length,
+      data: assignments
+    });
+  } catch (error) {
+    console.error('Error fetching lecturer assignments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assignments'
+    });
+  }
+});
 // Get assignments for a course
 AssignmentRouter.get('/course/:courseId', async (req, res) => {
   try {

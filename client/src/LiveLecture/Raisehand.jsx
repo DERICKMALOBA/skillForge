@@ -1,10 +1,16 @@
 import React from "react";
 import { FaHandPaper } from "react-icons/fa";
 
-const RaiseHand = ({ raisedHand, handleRaiseHand }) => {
+const RaiseHand = ({ isRaised, onRaiseHand }) => {
   return (
-    <button onClick={handleRaiseHand} className="p-3 m-2 bg-gray-700 rounded-full">
-      <FaHandPaper className={raisedHand ? "text-yellow-500" : ""} />
+    <button 
+      onClick={onRaiseHand}
+      className={`p-3 rounded-full transition-colors ${
+        isRaised ? "bg-yellow-500/20" : "bg-gray-700"
+      }`}
+      aria-label={isRaised ? "Lower hand" : "Raise hand"}
+    >
+      <FaHandPaper className={isRaised ? "text-yellow-500 animate-bounce" : ""} />
     </button>
   );
 };

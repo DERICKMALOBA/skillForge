@@ -9,6 +9,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { promisify } = require('util');
+const Message = require("../Models/messagemodel");
 const unlinkAsync = promisify(fs.unlink);
 
 // Configure storage for file uploads
@@ -256,6 +257,66 @@ LecturerRouter.get("/materials", async (req, res) => {
 
 
 
+const authenticateLecturer = async (req, res, next) => {
+  try {
+    const lecturerId = req.headers['lecturer-id'] || 
+                      req.headers['Lecturer-Id'] || 
+                      req.headers['LECTURER-ID'];
+
+    const userRole = req.headers['x-user-role'] || 
+                    req.headers['X-User-Role'];
+
+    console.log('Auth Middleware - Received headers:', {
+      lecturerId,
+      userRole,
+      allHeaders: req.headers
+    });
+
+    if (!lecturerId || lecturerId === 'undefined') {
+      return res.status(401).json({ 
+        message: "Authentication required",
+        solution: "Please include your lecturer ID in headers as 'Lecturer-Id'"
+      });
+    }
+
+    if (userRole?.toLowerCase() !== 'lecturer') {
+      return res.status(403).json({
+        message: "Access forbidden",
+        details: "Lecturer privileges required",
+        receivedRole: userRole
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(lecturerId)) {
+      return res.status(400).json({
+        message: "Invalid ID format",
+        expected: "MongoDB ObjectId",
+        received: lecturerId
+      });
+    }
+
+    const lecturer = await Lecturer.findById(lecturerId);
+    if (!lecturer) {
+      return res.status(404).json({
+        message: "Lecturer account not found",
+        actions: ["Contact administration"],
+        searchedId: lecturerId
+      });
+    }
+
+    req.lecturer = lecturer;
+    next();
+  } catch (error) {
+    console.error('Authentication Middleware Error:', error);
+    res.status(500).json({
+      message: "Authentication system error",
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+
 // Material Download Endpoint
 LecturerRouter.get("/materials/download/:materialId", async (req, res) => {
   try {
@@ -463,6 +524,37 @@ LecturerRouter.get("/chat/participants/:courseId", async (req, res) => {
     });
   }
 });
+
+LecturerRouter.get('/messages/lecturer/:lecturerId', authenticateLecturer, async (req, res) => {
+  try {
+    const lecturerId = req.params.lecturerId;
+
+    if (req.lecturer._id.toString() !== lecturerId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access to messages"
+      });
+    }
+
+    const messages = await Message.find({
+      to: lecturerId,
+      toRole: 'lecturer'
+    }).sort({ timestamp: -1 });
+
+    res.status(200).json({
+      success: true,
+      messages
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch messages',
+      error: error.message
+    });
+  }
+});
+
+
 
 // Get message history for a course
 LecturerRouter.get("/chat/messages/:courseId", async (req, res) => {

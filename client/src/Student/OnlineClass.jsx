@@ -33,14 +33,8 @@ export default function OnlineClasses() {
 
     fetchActiveLectures();
 
-    // Socket listeners for real-time updates
-    const handleLectureCreated = (lecture) => {
-      setLiveLectures(prev => [...prev, lecture]);
-    };
-
-    const handleLectureEnded = (lectureId) => {
-      setLiveLectures(prev => prev.filter(l => l.id !== lectureId));
-    };
+  
+    
 
     return () => {
       socket.off('lecture-created');
@@ -121,7 +115,7 @@ export default function OnlineClasses() {
                   <div>
                     <h4 className="font-medium">{lecture.courseName || 'Live Lecture'}</h4>
                     <p className="text-sm text-gray-500">
-                      Hosted by: {lecture.lecturerName}
+                      Hosted by:{lecture.lectureTitle} {lecture.lecturerName}
                     </p>
                     <p className="text-sm text-gray-500">
                       {lecture.participantCount || 0} students attending
@@ -143,10 +137,7 @@ export default function OnlineClasses() {
         )}
       </div>
 
-      <div className="mt-6">
-        <h3 className="font-medium text-lg">Recorded Sessions</h3>
-        <p className="text-gray-500 mt-2">Coming soon...</p>
-      </div>
+   
     </div>
   );
 }

@@ -15,45 +15,28 @@ const transporter = nodemailer.createTransport({
 
 // 
 NotifyRouter.post("/notify", async (req, res) => {
-    console.log("=== NOTIFICATION REQUEST RECEIVED ===");
-    console.log("Headers:", req.headers);
-    console.log("Request Body:", req.body);
+    
   
     try {
       const { lecturerId, studentIds, title, description, startTime, endTime } = req.body;
   
-      // Log received data
-      console.log("Parsed Data:", {
-        lecturerId,
-        studentIdsCount: studentIds?.length || 0,
-        title,
-        descriptionLength: description?.length || 0,
-        startTime,
-        endTime
-      });
+    
   
       // Validate input
       if (!lecturerId || !studentIds || !title || !startTime || !endTime) {
-        console.error("Validation Error: Missing required fields");
+     
         return res.status(400).json({ error: "Missing required fields" });
       }
   
       // Get lecturer info
-      console.log("Fetching lecturer info for ID:", lecturerId);
+    
       const lecturer = await Lecturer.findById(lecturerId);
-      console.log("Lecturer found:", lecturer ? lecturer.name : "Not found");
+   
   
-      // Send emails to all students
-      console.log("Fetching students with IDs:", studentIds);
+   
       const students = await Student.find({ _id: { $in: studentIds } }).select("name email");
-      console.log("Students found:", students.length);
+   
   
-      // Log email transporter configuration
-      console.log("Email Transporter Config:", {
-        service: transporter.options.service,
-        authUser: transporter.options.auth.user,
-        authPass: transporter.options.auth.pass ? "***" : "undefined"
-      });
   
       const emailPromises = students.map(async (student) => {
         const mailOptions = {
@@ -72,21 +55,21 @@ NotifyRouter.post("/notify", async (req, res) => {
           `,
         };
   
-        console.log("Preparing to send email to:", student.email);
+       
         return transporter.sendMail(mailOptions)
           .then(info => {
-            console.log(`Email sent to ${student.email}:`, info.messageId);
+           
             return info;
           })
           .catch(err => {
-            console.error(`Failed to send email to ${student.email}:`, err);
+          
             throw err;
           });
       });
   
-      console.log("Starting to send all emails...");
+   
       await Promise.all(emailPromises);
-      console.log("All emails sent successfully");
+     
   
       res.status(201).json({
         status: "success",
@@ -94,8 +77,7 @@ NotifyRouter.post("/notify", async (req, res) => {
         emailsSent: students.length
       });
     } catch (error) {
-      console.error("Full Error:", error);
-      console.error("Error Stack:", error.stack);
+     
       
       res.status(500).json({
         status: "error",
